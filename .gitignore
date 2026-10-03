@@ -22,6 +22,8 @@ dist/
 *.key
 keystore.properties
 signing.properties
+# 本地签名材料目录（密钥库 + 密码），任何情况下都不得提交
+/signing/
 iosApp/Configuration/Local.xcconfig
 iosApp/Resources/Runtime/root.tar.gz
 iosApp/Resources/Runtime/bridge.mjs
