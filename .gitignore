@@ -1,0 +1,61 @@
+# Gradle and Android build output
+.gradle/
+build/
+**/build/
+**/.cxx/
+**/node_modules/
+
+# Local Android/IDE state
+local.properties
+.idea/
+*.iml
+captures/
+# Release artifacts and signing material
+dist/
+*.apk
+*.aab
+*.ap_
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+keystore.properties
+signing.properties
+iosApp/Configuration/Local.xcconfig
+iosApp/Resources/Runtime/root.tar.gz
+iosApp/Resources/Runtime/bridge.mjs
+iosApp/Resources/Runtime/extension-bridge.mjs
+iosApp/Resources/Runtime/image-resize-worker.js
+iosApp/Resources/Runtime/photon_rs_bg.wasm
+iosApp/Resources/Runtime/extensions/
+DerivedData/
+
+# Secrets and local service configuration
+.env
+.env.*
+secrets.properties
+google-services.json
+
+# Agent/editor scratch data
+.agents/
+.claude/
+.trash/
+reports/
+*-report.md
+*.bak
+*.tmp
+*.temp
+*.old
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+
+# Logs and OS metadata
+*.log
+Thumbs.db
+.DS_Store
+xcuserdata/
+pi-bridge/session-*.jsonl
