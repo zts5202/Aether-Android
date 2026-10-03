@@ -20,7 +20,8 @@ on:
       - '.github/workflows/build-nightly-apk.yml'
 
 permissions:
-  contents: read
+  # 需要 write 权限才能在 Push 后创建/更新 nightly 预发布并上传 APK。
+  contents: write
 
 jobs:
   build:
@@ -66,20 +67,40 @@ jobs:
           echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
           echo "version_name=Nightly $short_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Restore Nightly Signing Key
+      # 只有在 4 个签名 Secret 都配置齐全时才注入 keystore 路径。
+      # 这一点很关键：app/build.gradle.kts 的 nightly 构建类型用
+      # NIGHTLY_KEYSTORE_FILE 是否非空来决定走正式签名还是 debug 签名；
+      # 若只设置路径却没有密码，会拿到一个配置不完整的 signingConfig 而构建失败。
+      - name: Restore Nightly Signing Key (optional)
+        id: signing
         shell: bash
         env:
-          NIGHTLY_KEYSTORE_BASE64: ${{ secrets.NIGHTLY_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.NIGHTLY_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.NIGHTLY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NIGHTLY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NIGHTLY_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "::warning::未配置签名密钥 Secret，本次回退到 debug 签名：APK 可正常安装，但签名每次构建都会变化，用户无法覆盖升级已安装的旧版本。"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           mkdir -p "$RUNNER_TEMP/aether-signing"
-          echo "$NIGHTLY_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aether-signing/aether-nightly.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aether-signing/aether-nightly.jks"
+          {
+            echo "NIGHTLY_KEYSTORE_FILE=$RUNNER_TEMP/aether-signing/aether-nightly.jks"
+            echo "NIGHTLY_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "NIGHTLY_KEY_ALIAS=$KEY_ALIAS"
+            echo "NIGHTLY_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "已载入签名密钥库，alias=${KEY_ALIAS}"
 
       - name: Build Nightly APK
+        # 注意：签名相关的 4 个环境变量由上一步写入 $GITHUB_ENV，
+        # 这里不能再声明同名 env，否则空的 Secret 会覆盖掉已载入的 keystore 配置。
         env:
-          NIGHTLY_KEYSTORE_FILE: ${{ runner.temp }}/aether-signing/aether-nightly.jks
-          NIGHTLY_KEYSTORE_PASSWORD: ${{ secrets.NIGHTLY_KEYSTORE_PASSWORD }}
-          NIGHTLY_KEY_ALIAS: ${{ secrets.NIGHTLY_KEY_ALIAS }}
-          NIGHTLY_KEY_PASSWORD: ${{ secrets.NIGHTLY_KEY_PASSWORD }}
           VERSION_NAME: ${{ steps.nightly.outputs.version_name }}
         run: ./gradlew :app:assembleNightly --stacktrace -Paether.versionName="$VERSION_NAME"
 
@@ -88,11 +109,53 @@ jobs:
         env:
           SHORT_SHA: ${{ steps.nightly.outputs.short_sha }}
         run: |
+          set -euo pipefail
           mkdir -p dist/nightly
           cp app/build/outputs/apk/nightly/app-nightly.apk "dist/nightly/Aether-nightly-${SHORT_SHA}.apk"
+          # 稳定文件名：Release 上的下载链接不会随 commit 变化。
+          cp app/build/outputs/apk/nightly/app-nightly.apk "dist/nightly/Aether-nightly.apk"
+          sha256sum dist/nightly/*.apk > dist/nightly/SHA256SUMS.txt
+          cat dist/nightly/SHA256SUMS.txt
+          ls -lh dist/nightly
 
       - name: Upload Nightly APK
         uses: actions/upload-artifact@v7
         with:
           name: Aether-nightly
-          path: dist/nightly/*.apk
+          path: dist/nightly/*
+
+      # 每次推送 main 都把最新 APK 覆盖到滚动预发布 nightly 上，
+      # 用户始终可以从同一个地址下载最新构建。
+      - name: Publish rolling nightly pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHORT_SHA: ${{ steps.nightly.outputs.short_sha }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
+        run: |
+          set -euo pipefail
+          if [[ "$SIGNED" == "true" ]]; then
+            signing_note="本 APK 已使用项目正式密钥签名。"
+          else
+            signing_note="⚠️ 本次构建使用 debug 签名（仓库尚未配置签名密钥），安装时可能需要先卸载旧版本。"
+          fi
+          notes="自动构建的 Aether nightly（commit \`${SHORT_SHA}\`）。
+
+          ${signing_note}
+
+          下载：\`Aether-nightly.apk\`"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release upload nightly \
+              dist/nightly/Aether-nightly.apk \
+              dist/nightly/SHA256SUMS.txt \
+              --clobber
+            gh release edit nightly --notes "$notes"
+          else
+            gh release create nightly \
+              dist/nightly/Aether-nightly.apk \
+              dist/nightly/SHA256SUMS.txt \
+              --title "Aether Nightly" \
+              --prerelease \
+              --notes "$notes"
+          fi
+          echo "nightly 预发布已更新。"

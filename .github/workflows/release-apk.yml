@@ -1,0 +1,186 @@
+name: Build & Release APK
+
+# 自动编译 APK 并发布到 GitHub Releases。
+#
+# 触发方式：
+#   1. 推送 v* 标签 —— 编译并创建正式 Release
+#        git tag v2.1.6 && git push origin v2.1.6
+#   2. 手动触发（Actions → Build & Release APK → Run workflow）
+#        - 填了 tag  → 编译并创建/更新该 Release
+#        - 留空 tag  → 只编译并上传为 Artifact，不发布
+#
+# 签名说明：配置以下 4 个 Repository secret 后会自动使用正式签名；
+# 未配置时回退到 Android debug 签名（APK 仍可安装，但每次构建签名不同，
+# 用户无法在已安装旧版的基础上直接覆盖升级）。
+#   NIGHTLY_KEYSTORE_BASE64 / NIGHTLY_KEYSTORE_PASSWORD / NIGHTLY_KEY_ALIAS / NIGHTLY_KEY_PASSWORD
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本名（写入 APK 的 versionName，留空则自动生成 nightly-<sha>）'
+        required: false
+        type: string
+        default: ''
+      tag:
+        description: 'Release 标签，例如 v2.1.6（留空则只上传 Artifact，不创建 Release）'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and release APK
+    runs-on: ubuntu-latest
+    # 冷缓存时需要下载 Android SDK / NDK / Gradle 依赖，留足余量。
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+          cache-dependency-path: pi-bridge/package-lock.json
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: enhanced
+          cache-read-only: false
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::12}"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          else
+            tag="${INPUT_TAG}"
+            version="${INPUT_VERSION}"
+            if [[ -z "$version" ]]; then
+              version="nightly-${short_sha}"
+            fi
+          fi
+          apk_name="Aether-${version}-${short_sha}.apk"
+          {
+            echo "short_sha=${short_sha}"
+            echo "tag=${tag}"
+            echo "version=${version}"
+            echo "apk_name=${apk_name}"
+          } >> "$GITHUB_OUTPUT"
+          echo "版本名: ${version}"
+          echo "Release 标签: ${tag:-（不发布，仅上传 Artifact）}"
+
+      - name: Restore signing keystore (optional)
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NIGHTLY_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.NIGHTLY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NIGHTLY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NIGHTLY_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "::warning::未配置签名密钥 Secret，本次回退到 debug 签名：APK 可正常安装，但签名每次构建都会变化，用户无法覆盖升级已安装的旧版本。"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/aether-release.jks"
+          {
+            echo "NIGHTLY_KEYSTORE_FILE=$RUNNER_TEMP/signing/aether-release.jks"
+            echo "NIGHTLY_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "NIGHTLY_KEY_ALIAS=$KEY_ALIAS"
+            echo "NIGHTLY_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "已载入签名密钥库，alias=${KEY_ALIAS}"
+
+      - name: Build APK
+        env:
+          VERSION_NAME: ${{ steps.meta.outputs.version }}
+        run: ./gradlew :app:assembleNightly --stacktrace -Paether.versionName="$VERSION_NAME"
+
+      - name: Collect APK
+        shell: bash
+        env:
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/nightly/app-nightly.apk "dist/${APK_NAME}"
+          sha256sum "dist/${APK_NAME}" | tee "dist/${APK_NAME}.sha256"
+          ls -lh dist
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Aether-${{ steps.meta.outputs.version }}
+          path: |
+            dist/*.apk
+            dist/*.sha256
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: steps.meta.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
+        run: |
+          set -euo pipefail
+          if [[ "$SIGNED" == "true" ]]; then
+            signing_note="本 APK 已使用项目正式密钥签名。"
+          else
+            signing_note="⚠️ 本次构建使用 debug 签名（仓库尚未配置签名密钥），安装时可能需要先卸载旧版本。"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "dist/${APK_NAME}" "dist/${APK_NAME}.sha256" --clobber
+            echo "已更新已有 Release ${TAG} 的 APK 资源。"
+          else
+            gh release create "$TAG" "dist/${APK_NAME}" "dist/${APK_NAME}.sha256" \
+              --title "Aether ${VERSION}" \
+              --notes "${signing_note}" \
+              --generate-notes
+            echo "已创建 Release ${TAG}。"
+          fi
