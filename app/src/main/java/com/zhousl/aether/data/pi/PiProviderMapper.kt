@@ -174,7 +174,8 @@ fun JSONObject.toPiCompletionResult(): PiCompletionResult =
         assistantText = optString("assistant_text"),
         reasoningText = optString("reasoning_text"),
         assistantMessage = optJSONObject("assistant_message") ?: JSONObject(),
-        usage = optJSONObject("usage")?.toLlmTokenUsage(),
+        usage = optJSONObject("turn_usage")?.toLlmTokenUsage()
+            ?: optJSONObject("usage")?.toLlmTokenUsage(),
         provider = optString("provider"),
         model = optString("model"),
         responseId = optString("response_id"),
@@ -212,6 +213,7 @@ fun PiCompletionResult.toProviderPayloadJson(): String = JSONObject().apply {
                 tokenUsage.reasoningTokens?.let { put("reasoning_tokens", it) }
                 tokenUsage.cachedInputTokens?.let { put("cached_input_tokens", it) }
                 put("request_count", tokenUsage.requestCount)
+                tokenUsage.costUsd?.let { put("cost_usd", it) }
             },
         )
     }
@@ -245,6 +247,12 @@ private fun JSONObject.toLlmTokenUsage(): LlmTokenUsage? {
         totalTokens = optPositiveLong("total_tokens"),
         reasoningTokens = optPositiveLong("reasoning_tokens"),
         cachedInputTokens = optPositiveLong("cached_input_tokens"),
+        requestCount = optInt("request_count", 1).coerceAtLeast(1),
+        costUsd = if (has("cost_usd") && !isNull("cost_usd")) {
+            optDouble("cost_usd").takeIf { it.isFinite() && it > 0.0 }
+        } else {
+            null
+        },
     ).withMissingTotalResolved()
     return usage.takeIf {
         it.inputTokens != null ||

@@ -1256,6 +1256,7 @@ private fun parseUsageStatistics(json: JSONObject?): ChatUsageStatistics? {
         reasoningTokens = json.optionalLong("reasoningTokens"),
         cachedInputTokens = json.optionalLong("cachedInputTokens"),
         requestCount = json.optInt("requestCount", 1).coerceAtLeast(1),
+        costUsd = if (json.has("costUsd") && !json.isNull("costUsd")) json.optDouble("costUsd") else null,
         tokenUsageSource = json.optString("tokenUsageSource").ifBlank { "unavailable" },
         startedAtMillis = json.optLong("startedAtMillis"),
         firstTokenAtMillis = json.optionalLong("firstTokenAtMillis"),
@@ -1270,6 +1271,7 @@ private fun ChatUsageStatistics.toJson(): JSONObject = JSONObject().apply {
     reasoningTokens?.let { put("reasoningTokens", it) }
     cachedInputTokens?.let { put("cachedInputTokens", it) }
     put("requestCount", requestCount)
+    costUsd?.let { put("costUsd", it) }
     put("tokenUsageSource", tokenUsageSource)
     if (startedAtMillis > 0L) put("startedAtMillis", startedAtMillis)
     firstTokenAtMillis?.let { put("firstTokenAtMillis", it) }

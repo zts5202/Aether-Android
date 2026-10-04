@@ -4280,7 +4280,7 @@ class AetherViewModel(
                     val newSession = createSession(
                         id = targetSessionId,
                         messages = listOf(userMessage),
-                        title = "New chat",
+                        title = getApplication<Application>().getString(R.string.new_chat),
                         hasCustomTitle = true,
                         selectedModelKey = current.draftSelectedModelKey.ifBlank {
                             resolveDefaultChatModelKey(current.settings, current.providerConfigs)
@@ -5472,7 +5472,7 @@ class AetherViewModel(
                 val compactedMessages = session.messages + ChatMessage(
                     id = "compact-status-$now",
                     author = MessageAuthor.Agent,
-                    text = "Context compacted",
+                    text = getApplication<Application>().getString(R.string.context_compacted),
                     createdAtMillis = now,
                     assistantActionsHidden = true,
                     displayKind = MessageDisplayKind.CompactStatus,

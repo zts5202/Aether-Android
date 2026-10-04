@@ -91,6 +91,7 @@ import {
   invokeAetherAppExtensionAction,
   loadAetherAppExtensions,
 } from "./aether-extensions.js";
+import { agentDisplayContextExtensionFactory } from "./agent-display-context.js";
 import { bridgeDebug, bridgeDebugEnabled, bridgeDiagnostic, elapsedMillis } from "./debug.js";
 import { reserveProtocolStdout, writeProtocolFrame } from "./protocol-output.js";
 
@@ -1415,6 +1416,41 @@ function usagePayload(usage: Usage | undefined): JsonObject {
   };
 }
 
+/** Sums every model request made since [sinceTimestamp]; one user turn may issue many. */
+function turnUsagePayload(messages: AgentMessage[], sinceTimestamp: number): JsonObject {
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let totalTokens = 0;
+  let reasoning = 0;
+  let costUsd = 0;
+  let requestCount = 0;
+  for (const message of messages) {
+    if (message.role !== "assistant" || message.timestamp < sinceTimestamp) continue;
+    const usage = message.usage;
+    if (!usage) continue;
+    requestCount++;
+    input += usage.input ?? 0;
+    output += usage.output ?? 0;
+    cacheRead += usage.cacheRead ?? 0;
+    cacheWrite += usage.cacheWrite ?? 0;
+    totalTokens += usage.totalTokens ?? 0;
+    reasoning += usage.reasoning ?? 0;
+    costUsd += usage.cost?.total ?? 0;
+  }
+  return {
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: totalTokens,
+    reasoning_tokens: reasoning,
+    cached_input_tokens: cacheRead,
+    cache_write_tokens: cacheWrite,
+    cost_usd: costUsd,
+    request_count: requestCount,
+  };
+}
+
 function assistantText(message: AssistantMessage): string {
   return message.content
     .filter((block) => block.type === "text")
@@ -2460,7 +2496,9 @@ async function createNativeAgentSession(
     agentDir,
     settingsManager,
     additionalExtensionPaths,
-    extensionFactories: platform === "android" ? [aetherChromeExtensionFactory] : [],
+    extensionFactories: platform === "android"
+      ? [aetherChromeExtensionFactory, agentDisplayContextExtensionFactory]
+      : [],
     additionalSkillPaths: stringArray(payload.skill_paths),
     appendSystemPrompt: [asString(payload.system_prompt)].filter(Boolean),
   });
@@ -2789,9 +2827,10 @@ async function runNativeAgentPrompt(
   state: AgentSessionState,
   text: string,
   images: ImageContent[],
-): Promise<AssistantMessage> {
+): Promise<{ message: AssistantMessage; turnUsage: JsonObject }> {
   state.currentRequestId = id;
-  state.lastAccessedAt = Date.now();
+  const startedAt = Date.now();
+  state.lastAccessedAt = startedAt;
   activeAborters.set(id, () => state.session.abort());
   activeAetherOperationRequestIds.add(id);
   try {
@@ -2801,7 +2840,7 @@ async function runNativeAgentPrompt(
     await state.session.waitForIdle();
     const message = latestAssistantMessage(state.session.messages);
     if (!message) throw new Error(`Pi session ${state.sessionId} has no assistant response.`);
-    return message;
+    return { message, turnUsage: turnUsagePayload(state.session.messages, startedAt) };
   } finally {
     activeAborters.delete(id);
     activeAetherOperationRequestIds.delete(id);
@@ -2822,9 +2861,10 @@ async function runNativeAgentTurn(id: string, payload: JsonObject): Promise<Json
     effective: state.session.thinkingLevel,
     session_reused: reused,
   });
-  const message = await runNativeAgentPrompt(id, state, prompt.text, prompt.images);
+  const { message, turnUsage } = await runNativeAgentPrompt(id, state, prompt.text, prompt.images);
   return {
     ...assistantPayload(message),
+    turn_usage: turnUsage,
     ...(await credentialPayload(state.credentialStore)),
     session_id: state.session.sessionId,
     session_file: state.session.sessionFile ?? "",
@@ -2860,8 +2900,10 @@ async function followUpNativeAgentSession(id: string, payload: JsonObject): Prom
         state.compatibilityFallbackState.developerRoleUnsupportedDetected,
     };
   }
+  const { message, turnUsage } = await runNativeAgentPrompt(id, state, prompt.text, prompt.images);
   return {
-    ...assistantPayload(await runNativeAgentPrompt(id, state, prompt.text, prompt.images)),
+    ...assistantPayload(message),
+    turn_usage: turnUsage,
     developer_role_unsupported_detected:
       state.compatibilityFallbackState.developerRoleUnsupportedDetected,
   };

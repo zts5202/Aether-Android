@@ -16,6 +16,41 @@ import org.junit.Test
 
 class PiProviderMapperTest {
     @Test
+    fun completionPrefersWholeTurnUsageWithCost() {
+        val completion = JSONObject().apply {
+            put("assistant_text", "done")
+            put("usage", JSONObject().put("input_tokens", 10).put("total_tokens", 20))
+            put(
+                "turn_usage",
+                JSONObject()
+                    .put("input_tokens", 32_403)
+                    .put("output_tokens", 1_940)
+                    .put("cached_input_tokens", 254_464)
+                    .put("total_tokens", 288_807)
+                    .put("cost_usd", 0.0136)
+                    .put("request_count", 19),
+            )
+        }.toPiCompletionResult()
+
+        val usage = completion.usage!!
+        assertEquals(288_807L, usage.totalTokens)
+        assertEquals(19, usage.requestCount)
+        assertEquals(0.0136, usage.costUsd!!, 1e-9)
+        assertEquals(0.0272, (usage + usage).costUsd!!, 1e-9)
+    }
+
+    @Test
+    fun completionWithoutPricingHasNoCost() {
+        val usage = JSONObject()
+            .put("usage", JSONObject().put("total_tokens", 20).put("cost_usd", 0))
+            .toPiCompletionResult()
+            .usage!!
+
+        assertEquals(null, usage.costUsd)
+        assertEquals(1, usage.requestCount)
+    }
+
+    @Test
     fun builtInOpenAiMapsDirectlyToPiCatalog() {
         val config = AppSettings(
             providerConfigId = "openai-config",

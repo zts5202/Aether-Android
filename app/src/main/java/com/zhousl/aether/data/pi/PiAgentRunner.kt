@@ -422,6 +422,7 @@ class PiAgentRunner(
                                 "response_session_id" to response.optString("session_id"),
                             ),
                         )
+                        var turnUsage = response.toPiCompletionResult().usage
                         forwardInjectedMessages()
                         while (true) {
                             val injected = deferredInjectedMessages.poll() ?: break
@@ -430,9 +431,15 @@ class PiAgentRunner(
                                 message = injected.toPiJson(),
                                 onEvent = eventHandler,
                             )
+                            val followUpUsage = response.toPiCompletionResult().usage
+                            turnUsage = when {
+                                turnUsage == null -> followUpUsage
+                                followUpUsage == null -> turnUsage
+                                else -> turnUsage + followUpUsage
+                            }
                         }
 
-                        val completion = response.toPiCompletionResult()
+                        val completion = response.toPiCompletionResult().copy(usage = turnUsage)
                         if (
                             settings.providerConfigId.isNotBlank() &&
                             completion.updatedOauthCredentialJson.isNotBlank()
@@ -732,7 +739,7 @@ private fun hostToolPayload(
             put(
                 JSONObject().apply {
                     put("type", "text")
-                    put("text", visibleOutput)
+                    put("text", AetherToolExecutor.modelVisibleToolOutput(toolName, visibleOutput))
                 }
             )
             if (toolName == "agent_display" || toolName == "chrome" || toolName == "browser") {

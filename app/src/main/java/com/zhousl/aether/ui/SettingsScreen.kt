@@ -5457,7 +5457,7 @@ private fun AlpineSettingsPage(
         onTrailingAction = onOpenTerminal,
         secondaryTrailingIcon = Icons.Rounded.Folder,
         secondaryTrailingEnabled = setupState.isReady,
-        secondaryTrailingContentDescription = "Open files",
+        secondaryTrailingContentDescription = stringResource(R.string.settings_open_files),
         onSecondaryTrailingAction = onOpenFiles,
         tertiaryTrailingIcon = Icons.Rounded.Public,
         tertiaryTrailingEnabled = packageProfiles["chrome"]?.installed == true,

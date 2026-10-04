@@ -154,6 +154,22 @@ class AetherToolExecutor(
             return parsed.toString()
         }
 
+        /**
+         * The tool-result text the model reads. The conversation keeps [visibleOutput] intact for
+         * the UI replay (preview_path, display-pixel cursor); fields the model has no use for are
+         * dropped here because every later request resends them.
+         */
+        fun modelVisibleToolOutput(toolName: String, visibleOutput: String): String {
+            if (toolName != "agent_display") return visibleOutput
+            val parsed = runCatching { JSONObject(visibleOutput) }.getOrNull() ?: return visibleOutput
+            AgentDisplayModelHiddenKeys.forEach(parsed::remove)
+            if (parsed.has("image_width")) {
+                parsed.remove("width")
+                parsed.remove("height")
+            }
+            return parsed.toString()
+        }
+
         fun inferToolOutputOk(output: String): Boolean {
             val parsed = runCatching { JSONObject(output) }.getOrNull() ?: return true
             return parsed.optBoolean("ok", !parsed.optBoolean("err", false))
@@ -166,6 +182,14 @@ private fun runtimeCwd(
     workspaceDirectory: String,
     termuxWorkspaceDirectory: String,
 ): String = if (runtimeId == LocalRuntimeId.Termux) termuxWorkspaceDirectory else workspaceDirectory
+
+private val AgentDisplayModelHiddenKeys = listOf(
+    "preview_path",
+    "cursor_x",
+    "cursor_y",
+    "screenshot_mime_type",
+    "screenshot_injected_into_next_model_request",
+)
 
 private val SelfManagementToolNames = setOf(
     "aether_config_get",
@@ -225,10 +249,13 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
         "description",
         "Operate Aether Agent Mode on an isolated Android virtual display. Use this only when Agent Mode is selected in the chat composer. " +
             "tap/swipe coordinates are normalized 0..1000 on each axis, independent of resolution; values above 1000 are rejected. " +
-            "Results report width/height (display pixels), image_width/image_height (screenshot pixels), " +
-            "cursor_norm_x/cursor_norm_y (last touch point, normalized) and cursor_x/cursor_y (the same point in display pixels). " +
+            "Results report image_width/image_height (screenshot pixels) and cursor_norm_x/cursor_norm_y (last touch point, normalized). " +
             "screenshot, tap, swipe and tap_text also return elements: offline-OCR text lines currently on screen, " +
-            "each with text, bbox_px (screenshot pixels) and bbox_norm (0..1000, directly reusable as tap/swipe coordinates). " +
+            "each with text and bbox_norm = [left, top, right, bottom] (0..1000, directly reusable as tap/swipe coordinates). " +
+            "When a tap, swipe or tap_text leaves the screen pixel-identical (checked again after a short wait), the screenshot is omitted and the result carries " +
+            "screenshot_omitted=\"unchanged\"; the previous screenshot is still current, and action=screenshot always returns an image. " +
+            "ui_changed_delayed=true means the screen only changed after that wait (e.g. a toggle confirmed by a server). " +
+            "In very long sessions older screenshots and element lists are replaced by placeholders; only the latest few stay in context. " +
             "Use find_text to inspect matches before an exact tap_text when the target text is uncertain.",
     )
     put(

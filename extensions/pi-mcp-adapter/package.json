@@ -1,7 +1,7 @@
 {
   "name": "pi-mcp-adapter",
   "version": "2.26.0-aether.1",
-  "description": "MCP (Model Context Protocol) adapter extension for Pi coding agent",
+  "description": "为 Pi 提供 MCP（Model Context Protocol）适配，用于添加和管理 MCP 服务器",
   "type": "module",
   "types": "./index.ts",
   "exports": {

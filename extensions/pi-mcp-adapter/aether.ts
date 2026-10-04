@@ -170,62 +170,62 @@ const settingStorageKey = (settingId: string) => `settings:${PAGE_ID}:${settingI
 type Transport = "stdio" | "http" | "socket";
 
 const TRANSPORT_OPTIONS = [
-  { value: "stdio", label: "Standard I/O (command)" },
-  { value: "http", label: "HTTP (Streamable HTTP / SSE)" },
-  { value: "socket", label: "Unix socket (rmcp-mux)" },
+  { value: "stdio", label: "标准输入输出（命令）" },
+  { value: "http", label: "HTTP（Streamable HTTP / SSE）" },
+  { value: "socket", label: "Unix 套接字（rmcp-mux）" },
 ] as const;
 
 const LIFECYCLE_OPTIONS = [
-  { value: "lazy", label: "Lazy (connect on first use)" },
-  { value: "eager", label: "Eager (connect at session start)" },
-  { value: "keep-alive", label: "Keep alive" },
-  { value: "lazy-keep-alive", label: "Lazy, then keep alive" },
+  { value: "lazy", label: "按需连接（首次使用时）" },
+  { value: "eager", label: "立即连接（会话开始时）" },
+  { value: "keep-alive", label: "保持连接" },
+  { value: "lazy-keep-alive", label: "按需连接，之后保持" },
 ] as const;
 
 const PROTOCOL_OPTIONS = [
-  { value: "legacy", label: "Legacy (default)" },
-  { value: "auto", label: "Auto (2026 with legacy fallback)" },
-  { value: "2026-07-28", label: "2026-07-28 only" },
+  { value: "legacy", label: "旧版（默认）" },
+  { value: "auto", label: "自动（2026，失败则回退旧版）" },
+  { value: "2026-07-28", label: "仅 2026-07-28" },
 ] as const;
 
 const HTTP_TRANSPORT_OPTIONS = [
-  { value: "auto", label: "Auto (Streamable HTTP with SSE fallback)" },
+  { value: "auto", label: "自动（Streamable HTTP，失败则回退 SSE）" },
   { value: "streamable-http", label: "Streamable HTTP" },
   { value: "sse", label: "SSE" },
 ] as const;
 
 const AUTH_OPTIONS = [
-  { value: "auto", label: "Auto (OAuth when available)" },
+  { value: "auto", label: "自动（可用时使用 OAuth）" },
   { value: "oauth", label: "OAuth" },
-  { value: "bearer", label: "Bearer token" },
-  { value: "none", label: "None" },
+  { value: "bearer", label: "Bearer Token" },
+  { value: "none", label: "无" },
 ] as const;
 
 const BOOLEAN_OPTIONS = [
-  { value: "default", label: "Default" },
-  { value: "true", label: "Yes" },
-  { value: "false", label: "No" },
+  { value: "default", label: "默认" },
+  { value: "true", label: "是" },
+  { value: "false", label: "否" },
 ] as const;
 
 const TOOL_PREFIX_OPTIONS = [
-  { value: "unset", label: "Use global setting" },
-  { value: "server", label: "server (server__tool)" },
-  { value: "short", label: "short (server_tool)" },
-  { value: "none", label: "none (original name)" },
-  { value: "mcp", label: "mcp (mcp__tool)" },
+  { value: "unset", label: "使用全局设置" },
+  { value: "server", label: "server（server__tool）" },
+  { value: "short", label: "short（server_tool）" },
+  { value: "none", label: "none（原始名称）" },
+  { value: "mcp", label: "mcp（mcp__tool）" },
 ] as const;
 
 const DIRECT_TOOLS_OPTIONS = [
-  { value: "unset", label: "Use global setting" },
-  { value: "all", label: "All as direct tools" },
-  { value: "proxy-only", label: "Proxy tool only" },
-  { value: "custom", label: "Custom tool list" },
+  { value: "unset", label: "使用全局设置" },
+  { value: "all", label: "全部作为直接工具" },
+  { value: "proxy-only", label: "仅代理工具" },
+  { value: "custom", label: "自定义工具列表" },
 ] as const;
 
 const GRANT_TYPE_OPTIONS = [
-  { value: "default", label: "Authorization code (default)" },
-  { value: "authorization_code", label: "Authorization code" },
-  { value: "client_credentials", label: "Client credentials" },
+  { value: "default", label: "授权码（默认）" },
+  { value: "authorization_code", label: "授权码" },
+  { value: "client_credentials", label: "客户端凭证" },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -247,7 +247,7 @@ function readRawConfig(): AetherJsonObject {
     const parsed = parseJsonText(readFileSync(path, "utf8"));
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as AetherJsonObject : {};
   } catch (error) {
-    throw new Error(`Failed to read MCP config at ${path}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    throw new Error(`无法读取 MCP 配置 ${path}：${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 
@@ -321,9 +321,9 @@ function clearServerStorage(api: AetherExtensionAPI, serverName: string): void {
 
 function validateServerName(name: string): string {
   const trimmed = name.trim();
-  if (!trimmed) throw new Error("Server name is required.");
+  if (!trimmed) throw new Error("必须填写服务器名称。");
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(trimmed)) {
-    throw new Error("Server name may contain only letters, numbers, dots, dashes, and underscores, and must start with a letter or number.");
+    throw new Error("服务器名称只能包含字母、数字、点、连字符和下划线，且必须以字母或数字开头。");
   }
   return trimmed;
 }
@@ -337,7 +337,7 @@ function integerValue(value: string, present: boolean): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) throw new Error(`Expected an integer, got "${trimmed}".`);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) throw new Error(`需要整数，实际为「${trimmed}」。`);
   return parsed;
 }
 
@@ -349,10 +349,10 @@ function parseRecord(value: string, labelText: string): Record<string, string> |
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const parsed = JSON.parse(stripJsonComments(trimmed, { trailingCommas: true }));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${labelText} must be a JSON object.`);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${labelText} 必须是 JSON 对象。`);
   const result: Record<string, string> = {};
   for (const [key, entry] of Object.entries(parsed)) {
-    if (typeof entry !== "string") throw new Error(`${labelText}.${key} must be a string.`);
+    if (typeof entry !== "string") throw new Error(`${labelText}.${key} 必须是字符串。`);
     result[key] = entry;
   }
   return Object.keys(result).length > 0 ? result : undefined;
@@ -364,7 +364,7 @@ function parseList(value: string, labelText: string): string[] | undefined {
   if (trimmed.startsWith("[")) {
     const parsed = JSON.parse(stripJsonComments(trimmed, { trailingCommas: true }));
     if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string")) {
-      throw new Error(`${labelText} must be a JSON array of strings.`);
+      throw new Error(`${labelText} 必须是字符串组成的 JSON 数组。`);
     }
     return parsed.length > 0 ? parsed as string[] : undefined;
   }
@@ -379,11 +379,11 @@ function parseKeywordRecord(value: string): Record<string, string[]> | undefined
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   const parsed = JSON.parse(stripJsonComments(trimmed, { trailingCommas: true }));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("searchKeywords must be a JSON object.");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("searchKeywords 必须是 JSON 对象。");
   const result: Record<string, string[]> = {};
   for (const [key, entry] of Object.entries(parsed)) {
     if (!Array.isArray(entry) || entry.some((keyword) => typeof keyword !== "string")) {
-      throw new Error(`searchKeywords.${key} must be an array of strings.`);
+      throw new Error(`searchKeywords.${key} 必须是字符串数组。`);
     }
     result[key] = entry as string[];
   }
@@ -502,34 +502,34 @@ function transportSettings(api: AetherExtensionAPI, prefix: string, transport: T
   const settings: AetherSettingDefinition[] = [];
   if (transport === "stdio") {
     settings.push(
-      text(`${prefix}command`, "Command", "Executable for the stdio transport, for example npx or uvx.", value(`${prefix}command`, serverFieldValue(entry, "command"))),
-      textarea(`${prefix}args`, "Arguments", "One argument per line. Environment interpolation is supported.", value(`${prefix}args`, formatList(entry.args))),
-      textarea(`${prefix}env`, "Environment", 'JSON object such as {"API_KEY": "$ENV_VAR"}. A value beginning with ! runs a command when the server connects.', value(`${prefix}env`, formatRecord(entry.env))),
-      text(`${prefix}cwd`, "Working directory", "Optional. Supports ${VAR}, $env:VAR, and ~.", value(`${prefix}cwd`, serverFieldValue(entry, "cwd"))),
+      text(`${prefix}command`, "命令", "stdio 传输要执行的程序，例如 npx 或 uvx。", value(`${prefix}command`, serverFieldValue(entry, "command"))),
+      textarea(`${prefix}args`, "参数", "每行一个参数，支持环境变量插值。", value(`${prefix}args`, formatList(entry.args))),
+      textarea(`${prefix}env`, "环境变量", 'JSON 对象，例如 {"API_KEY": "$ENV_VAR"}。以 ! 开头的值会在服务器连接时运行命令。', value(`${prefix}env`, formatRecord(entry.env))),
+      text(`${prefix}cwd`, "工作目录", "可选。支持 ${VAR}、$env:VAR 和 ~。", value(`${prefix}cwd`, serverFieldValue(entry, "cwd"))),
     );
   } else if (transport === "http") {
     settings.push(
-      text(`${prefix}url`, "URL", "HTTP MCP endpoint. Supports Streamable HTTP and legacy SSE.", value(`${prefix}url`, serverFieldValue(entry, "url"))),
-      select(`${prefix}httpTransport`, "HTTP transport", "Force a transport or let the adapter auto-negotiate.", value(`${prefix}httpTransport`, asString(entry.httpTransport, "auto")), HTTP_TRANSPORT_OPTIONS),
-      select(`${prefix}auth`, "Authentication", "OAuth is auto-detected by default unless custom headers are configured.", value(`${prefix}auth`, authMode(entry)), AUTH_OPTIONS),
-      password(`${prefix}bearerToken`, "Bearer token", "Optional static token. Supports ${VAR}, $env:VAR, and !command sources.", value(`${prefix}bearerToken`, serverFieldValue(entry, "bearerToken"))),
-      text(`${prefix}bearerTokenEnv`, "Bearer token env var", "Optional environment variable containing the bearer token.", value(`${prefix}bearerTokenEnv`, serverFieldValue(entry, "bearerTokenEnv"))),
-      textarea(`${prefix}headers`, "HTTP headers", 'JSON object such as {"Authorization": "Bearer ${TOKEN}"}.', value(`${prefix}headers`, formatRecord(entry.headers))),
-      select(`${prefix}oauthGrantType`, "OAuth grant type", "Client credentials completes without opening a browser.", value(`${prefix}oauthGrantType`, oauthValue(entry, "grantType", "default")), GRANT_TYPE_OPTIONS),
-      text(`${prefix}oauthClientId`, "OAuth client ID", "Optional pre-registered client ID. Dynamic registration is used when empty.", value(`${prefix}oauthClientId`, oauthValue(entry, "clientId"))),
-      password(`${prefix}oauthClientSecret`, "OAuth client secret", "Optional confidential-client secret. A leading ! runs a command.", value(`${prefix}oauthClientSecret`, oauthValue(entry, "clientSecret"))),
-      text(`${prefix}oauthScope`, "OAuth scopes", "Space-separated scopes requested from the authorization server.", value(`${prefix}oauthScope`, oauthValue(entry, "scope"))),
-      text(`${prefix}oauthRedirectUri`, "OAuth redirect URI", "Exact pre-registered localhost callback, including port and path.", value(`${prefix}oauthRedirectUri`, oauthValue(entry, "redirectUri"))),
-      text(`${prefix}oauthClientName`, "OAuth client name", "Client display name advertised during dynamic registration.", value(`${prefix}oauthClientName`, oauthValue(entry, "clientName"))),
-      text(`${prefix}oauthClientUri`, "OAuth client URI", "Client homepage advertised during dynamic registration.", value(`${prefix}oauthClientUri`, oauthValue(entry, "clientUri"))),
-      text(`${prefix}oauthLogoUri`, "OAuth logo URL", "Absolute http(s) logo URL advertised during dynamic registration.", value(`${prefix}oauthLogoUri`, oauthValue(entry, "logoUri"))),
-      toggle(`${prefix}oauthSkipIssuerValidation`, "Skip OAuth issuer validation", "Security-weakening escape hatch for known-misconfigured authorization servers.", oauthSkipIssuer(entry)),
-      textarea(`${prefix}oauthAuthorizationParams`, "OAuth authorization params", 'Optional JSON object of extra authorization URL parameters.', value(`${prefix}oauthAuthorizationParams`, formatRecord((entry.oauth as AetherJsonObject | undefined)?.authorizationParams))),
-      textarea(`${prefix}requestHeadersCommand`, "Per-request headers command", 'Optional JSON object { "command": "...", "args": [...] }. Derives fail-closed headers for every HTTP request.', value(`${prefix}requestHeadersCommand`, requestHeadersCommandValue(entry))),
+      text(`${prefix}url`, "URL", "HTTP MCP 端点。支持 Streamable HTTP 和旧版 SSE。", value(`${prefix}url`, serverFieldValue(entry, "url"))),
+      select(`${prefix}httpTransport`, "HTTP 传输", "强制指定传输方式，或由适配器自动协商。", value(`${prefix}httpTransport`, asString(entry.httpTransport, "auto")), HTTP_TRANSPORT_OPTIONS),
+      select(`${prefix}auth`, "身份验证", "默认自动检测 OAuth，除非配置了自定义请求头。", value(`${prefix}auth`, authMode(entry)), AUTH_OPTIONS),
+      password(`${prefix}bearerToken`, "Bearer Token", "可选的静态令牌。支持 ${VAR}、$env:VAR 和 !command 来源。", value(`${prefix}bearerToken`, serverFieldValue(entry, "bearerToken"))),
+      text(`${prefix}bearerTokenEnv`, "Bearer Token 环境变量", "存放 Bearer Token 的可选环境变量。", value(`${prefix}bearerTokenEnv`, serverFieldValue(entry, "bearerTokenEnv"))),
+      textarea(`${prefix}headers`, "HTTP 请求头", 'JSON 对象，例如 {"Authorization": "Bearer ${TOKEN}"}。', value(`${prefix}headers`, formatRecord(entry.headers))),
+      select(`${prefix}oauthGrantType`, "OAuth 授权类型", "客户端凭证模式无需打开浏览器即可完成。", value(`${prefix}oauthGrantType`, oauthValue(entry, "grantType", "default")), GRANT_TYPE_OPTIONS),
+      text(`${prefix}oauthClientId`, "OAuth 客户端 ID", "可选的预注册客户端 ID。留空则使用动态注册。", value(`${prefix}oauthClientId`, oauthValue(entry, "clientId"))),
+      password(`${prefix}oauthClientSecret`, "OAuth 客户端密钥", "可选的机密客户端密钥。以 ! 开头会运行命令。", value(`${prefix}oauthClientSecret`, oauthValue(entry, "clientSecret"))),
+      text(`${prefix}oauthScope`, "OAuth 范围", "向授权服务器请求的范围，用空格分隔。", value(`${prefix}oauthScope`, oauthValue(entry, "scope"))),
+      text(`${prefix}oauthRedirectUri`, "OAuth 重定向 URI", "预注册的 localhost 回调地址，须包含端口和路径。", value(`${prefix}oauthRedirectUri`, oauthValue(entry, "redirectUri"))),
+      text(`${prefix}oauthClientName`, "OAuth 客户端名称", "动态注册时展示的客户端名称。", value(`${prefix}oauthClientName`, oauthValue(entry, "clientName"))),
+      text(`${prefix}oauthClientUri`, "OAuth 客户端 URI", "动态注册时展示的客户端主页。", value(`${prefix}oauthClientUri`, oauthValue(entry, "clientUri"))),
+      text(`${prefix}oauthLogoUri`, "OAuth Logo URL", "动态注册时展示的绝对 http(s) Logo 地址。", value(`${prefix}oauthLogoUri`, oauthValue(entry, "logoUri"))),
+      toggle(`${prefix}oauthSkipIssuerValidation`, "跳过 OAuth 签发方校验", "仅用于已知配置有误的授权服务器，会降低安全性。", oauthSkipIssuer(entry)),
+      textarea(`${prefix}oauthAuthorizationParams`, "OAuth 授权参数", "额外授权 URL 参数的可选 JSON 对象。", value(`${prefix}oauthAuthorizationParams`, formatRecord((entry.oauth as AetherJsonObject | undefined)?.authorizationParams))),
+      textarea(`${prefix}requestHeadersCommand`, "每次请求的请求头命令", '可选 JSON 对象 { "command": "...", "args": [...] }。为每次 HTTP 请求生成失败即关闭的请求头。', value(`${prefix}requestHeadersCommand`, requestHeadersCommandValue(entry))),
     );
   } else {
     settings.push(
-      text(`${prefix}socket`, "Socket path", "Explicit rmcp-mux Unix-domain socket. Supports ${VAR}, $env:VAR, and ~.", value(`${prefix}socket`, serverFieldValue(entry, "socket"))),
+      text(`${prefix}socket`, "套接字路径", "明确的 rmcp-mux Unix 域套接字。支持 ${VAR}、$env:VAR 和 ~。", value(`${prefix}socket`, serverFieldValue(entry, "socket"))),
     );
   }
   return settings;
@@ -539,22 +539,22 @@ function commonSettings(api: AetherExtensionAPI, prefix: string, entry: AetherJs
   const value = (id: string, fallback: string) => stored(api, id, fallback);
   const directMode = value(`${prefix}directTools`, directToolsMode(entry));
   return [
-    select(`${prefix}lifecycle`, "Lifecycle", "When the server process or HTTP session is connected.", value(`${prefix}lifecycle`, asString(entry.lifecycle, "lazy")), LIFECYCLE_OPTIONS),
-    number(`${prefix}idleTimeout`, "Idle timeout (minutes)", "Minutes before idle disconnect. Empty uses the global setting, 0 disables idle timeout.", value(`${prefix}idleTimeout`, entry.idleTimeout === undefined ? "" : String(entry.idleTimeout))),
-    number(`${prefix}requestTimeoutMs`, "Request timeout (ms)", "Milliseconds before live requests time out. Empty or 0 uses the SDK default.", value(`${prefix}requestTimeoutMs`, entry.requestTimeoutMs === undefined ? "" : String(entry.requestTimeoutMs))),
-    select(`${prefix}protocolVersion`, "MCP protocol era", "Legacy is the default. Auto offers 2026-07-28 with legacy fallback.", value(`${prefix}protocolVersion`, asString(entry.protocolVersion, "legacy")), PROTOCOL_OPTIONS),
-    select(`${prefix}exposeResources`, "Expose resources", "Expose MCP resources as callable tools.", value(`${prefix}exposeResources`, booleanSelectValue(entry, "exposeResources")), BOOLEAN_OPTIONS),
-    select(`${prefix}directTools`, "Direct tools", "Register tools individually instead of routing through the mcp proxy tool.", directMode, DIRECT_TOOLS_OPTIONS),
-    textarea(`${prefix}directToolsList`, "Custom direct tools", "Tool names, one per line or a JSON array. Used only when Custom is selected above.", value(`${prefix}directToolsList`, formatList(entry.directTools))),
-    select(`${prefix}toolPrefix`, "Tool prefix", "Prefix style for tools exposed by this server.", value(`${prefix}toolPrefix`, asString(entry.toolPrefix, "unset")), TOOL_PREFIX_OPTIONS),
-    textarea(`${prefix}includeTools`, "Include tools", "Optional tool names or glob patterns. Empty includes all tools.", value(`${prefix}includeTools`, formatList(entry.includeTools))),
-    textarea(`${prefix}excludeTools`, "Exclude tools", "Optional tool names or glob patterns to hide after includeTools.", value(`${prefix}excludeTools`, formatList(entry.excludeTools))),
-    textarea(`${prefix}searchKeywords`, "Search keywords", 'Optional JSON object such as {"list_issues": ["github", "issues"]}.', value(`${prefix}searchKeywords`, formatRecord(entry.searchKeywords))),
-    select(`${prefix}approveTools`, "Require approval", "Require interactive approval before calling matching tools.", value(`${prefix}approveTools`, booleanOrListMode(entry.approveTools)), DIRECT_TOOLS_OPTIONS),
-    textarea(`${prefix}approveToolsList`, "Custom approval tools", "Tool names, one per line or a JSON array. Used only when Custom is selected above.", value(`${prefix}approveToolsList`, formatList(entry.approveTools))),
-    toggle(`${prefix}debug`, "Show stderr", "Show the server's stderr in the Pi session log.", entry.debug === true),
-    toggle(`${prefix}trace`, "Protocol trace", "Enable metadata-only JSONL protocol tracing for this server.", entry.trace === true),
-    toggle(`${prefix}disabled`, "Disabled", "Keep this server configured but prevent connections and tool calls.", entry.disabled === true),
+    select(`${prefix}lifecycle`, "生命周期", "何时连接服务器进程或 HTTP 会话。", value(`${prefix}lifecycle`, asString(entry.lifecycle, "lazy")), LIFECYCLE_OPTIONS),
+    number(`${prefix}idleTimeout`, "空闲超时（分钟）", "空闲多久后断开。留空使用全局设置，0 表示禁用空闲超时。", value(`${prefix}idleTimeout`, entry.idleTimeout === undefined ? "" : String(entry.idleTimeout))),
+    number(`${prefix}requestTimeoutMs`, "请求超时（毫秒）", "实时请求超时毫秒数。留空或 0 使用 SDK 默认值。", value(`${prefix}requestTimeoutMs`, entry.requestTimeoutMs === undefined ? "" : String(entry.requestTimeoutMs))),
+    select(`${prefix}protocolVersion`, "MCP 协议版本", "默认使用旧版。自动会尝试 2026-07-28，失败则回退旧版。", value(`${prefix}protocolVersion`, asString(entry.protocolVersion, "legacy")), PROTOCOL_OPTIONS),
+    select(`${prefix}exposeResources`, "公开资源", "将 MCP 资源公开为可调用工具。", value(`${prefix}exposeResources`, booleanSelectValue(entry, "exposeResources")), BOOLEAN_OPTIONS),
+    select(`${prefix}directTools`, "直接工具", "单独注册工具，而不是经过 mcp 代理工具。", directMode, DIRECT_TOOLS_OPTIONS),
+    textarea(`${prefix}directToolsList`, "自定义直接工具", "工具名称，每行一个或 JSON 数组。仅在上方选择「自定义」时使用。", value(`${prefix}directToolsList`, formatList(entry.directTools))),
+    select(`${prefix}toolPrefix`, "工具前缀", "此服务器公开工具时的前缀风格。", value(`${prefix}toolPrefix`, asString(entry.toolPrefix, "unset")), TOOL_PREFIX_OPTIONS),
+    textarea(`${prefix}includeTools`, "包含工具", "可选的工具名称或 glob 模式。留空表示包含全部工具。", value(`${prefix}includeTools`, formatList(entry.includeTools))),
+    textarea(`${prefix}excludeTools`, "排除工具", "可选的工具名称或 glob 模式，在包含列表之后再隐藏。", value(`${prefix}excludeTools`, formatList(entry.excludeTools))),
+    textarea(`${prefix}searchKeywords`, "搜索关键词", '可选 JSON 对象，例如 {"list_issues": ["github", "issues"]}。', value(`${prefix}searchKeywords`, formatRecord(entry.searchKeywords))),
+    select(`${prefix}approveTools`, "需要批准", "调用匹配的工具前需要交互式批准。", value(`${prefix}approveTools`, booleanOrListMode(entry.approveTools)), DIRECT_TOOLS_OPTIONS),
+    textarea(`${prefix}approveToolsList`, "自定义批准工具", "工具名称，每行一个或 JSON 数组。仅在上方选择「自定义」时使用。", value(`${prefix}approveToolsList`, formatList(entry.approveTools))),
+    toggle(`${prefix}debug`, "显示 stderr", "在 Pi 会话日志中显示服务器的 stderr。", entry.debug === true),
+    toggle(`${prefix}trace`, "协议跟踪", "为此服务器启用仅元数据的 JSONL 协议跟踪。", entry.trace === true),
+    toggle(`${prefix}disabled`, "已停用", "保留此服务器配置，但禁止连接和工具调用。", entry.disabled === true),
   ];
 }
 
@@ -563,33 +563,33 @@ function serverCategory(api: AetherExtensionAPI, name: string, entry: AetherJson
   const transport: Transport = selectedTransport === "http" ? "http" : selectedTransport === "socket" ? "socket" : "stdio";
   const runtime = snapshot?.servers.find((server) => server.name === name);
   const status = runtime?.status ?? "not-connected";
-  const toolText = runtime ? `${runtime.toolCount} tools` : "not initialized";
+  const toolText = runtime ? `${runtime.toolCount} 个工具` : "尚未初始化";
   const subtitle = `${transportLabel(transport)} · ${statusLabel(status)} · ${toolText}`;
   const value = (id: string, fallback: string) => stored(api, id, fallback);
   const settings: AetherSettingDefinition[] = [
     label(`server:${name}:runtime`, status === "failed" && runtime?.failedAgoSeconds !== undefined
-      ? `Status: ${statusLabel(status)} ${runtime.failedAgoSeconds}s ago`
-      : `Status: ${statusLabel(status)}`, `Runtime status reported by the Pi extension. ${runtime?.disabled ? "This server is disabled." : ""}`),
-    select(`server:${name}:transport`, "Transport", "Switching transport clears the previous transport-specific fields.", value(`server:${name}:transport`, transport), TRANSPORT_OPTIONS),
+      ? `状态：${statusLabel(status)}，${runtime.failedAgoSeconds} 秒前`
+      : `状态：${statusLabel(status)}`, `Pi 插件报告的运行状态。${runtime?.disabled ? "此服务器已停用。" : ""}`),
+    select(`server:${name}:transport`, "传输方式", "切换传输方式会清除原先传输专用的字段。", value(`server:${name}:transport`, transport), TRANSPORT_OPTIONS),
     ...transportSettings(api, `server:${name}:`, transport, entry),
     ...commonSettings(api, `server:${name}:`, entry),
   ];
   const sections: AetherSettingsSection[] = [
-    { id: "configuration", title: "Configuration", settings },
+    { id: "configuration", title: "配置", settings },
     {
       id: "actions",
-      title: "Manage",
+      title: "管理",
       settings: [
-        text(`server:${name}:renameTo`, "Rename to", "Type the new name, then tap Rename server.", value(`server:${name}:renameTo`, "")),
-        button(`server:${name}:rename`, "Rename server", "mcp:rename-server", { serverName: name }, "Rename this server and keep its configuration.", "neutral"),
-        button(`server:${name}:reconnect`, "Reconnect", "mcp:reconnect-server", { serverName: name }, "Close and reconnect this server without reloading Pi.", "primary"),
+        text(`server:${name}:renameTo`, "重命名为", "输入新名称，然后点「重命名服务器」。", value(`server:${name}:renameTo`, "")),
+        button(`server:${name}:rename`, "重命名服务器", "mcp:rename-server", { serverName: name }, "重命名此服务器并保留其配置。", "neutral"),
+        button(`server:${name}:reconnect`, "重新连接", "mcp:reconnect-server", { serverName: name }, "关闭并重新连接此服务器，无需重新加载 Pi。", "primary"),
         ...(transport === "http" && entry.auth !== false
           ? [
-              button(`server:${name}:auth-start`, "Authenticate (OAuth)", "mcp:auth-start", { serverName: name }, "Start or continue the OAuth flow for this server.", "primary"),
-              button(`server:${name}:logout-oauth`, "Clear OAuth credentials", "mcp:oauth-logout", { serverName: name }, "Remove stored OAuth credentials and close the connection.", "neutral"),
+              button(`server:${name}:auth-start`, "进行 OAuth 授权", "mcp:auth-start", { serverName: name }, "为此服务器开始或继续 OAuth 流程。", "primary"),
+              button(`server:${name}:logout-oauth`, "清除 OAuth 凭据", "mcp:oauth-logout", { serverName: name }, "删除已保存的 OAuth 凭据并关闭连接。", "neutral"),
             ]
           : []),
-        button(`server:${name}:remove`, "Remove server", "mcp:remove-server", { serverName: name }, "Remove this server from the Pi MCP config.", "danger"),
+        button(`server:${name}:remove`, "删除服务器", "mcp:remove-server", { serverName: name }, "从此 Pi MCP 配置中删除此服务器。", "danger"),
       ],
     },
   ];
@@ -612,13 +612,13 @@ function newServerSection(api: AetherExtensionAPI): AetherSettingsSection {
   const empty: AetherJsonObject = {};
   return {
     id: "new-server",
-    title: "New MCP server",
+    title: "新建 MCP 服务器",
     settings: [
-      text("new_name", "Name", "Unique server name used as the config key and default tool prefix.", value("new_name", "")),
-      select("new_transport", "Transport", "All transports supported by the MCP adapter.", transport, TRANSPORT_OPTIONS),
+      text("new_name", "名称", "唯一服务器名称，用作配置键和默认工具前缀。", value("new_name", "")),
+      select("new_transport", "传输方式", "MCP 适配器支持的全部传输方式。", transport, TRANSPORT_OPTIONS),
       ...transportSettings(api, "new_", transport, empty),
       ...commonSettings(api, "new_", empty),
-      button("add-server", "Add MCP server", "mcp:add-server", {}, "Write this server to the Pi MCP config, then reload to connect.", "primary"),
+      button("add-server", "添加 MCP 服务器", "mcp:add-server", {}, "将此服务器写入 Pi MCP 配置，然后重新加载以连接。", "primary"),
     ],
   };
 }
@@ -627,7 +627,7 @@ function buildMainSections(api: AetherExtensionAPI, servers: Record<string, Aeth
   const serverNames = Object.keys(servers).sort();
   const serverCount = serverNames.length;
   const sections: AetherSettingsSection[] = [];
-  const readyText = snapshot.ready ? "ready" : "not initialized yet";
+  const readyText = snapshot.ready ? "已就绪" : "尚未初始化";
 
   if (serverCount === 0) {
     sections.push({
@@ -636,9 +636,9 @@ function buildMainSections(api: AetherExtensionAPI, servers: Record<string, Aeth
         {
           id: "no-servers-state",
           type: "empty-state",
-          title: "No MCP servers",
-          description: "Add HTTP or stdio servers to extend capabilities.",
-          buttonLabel: "Add server",
+          title: "还没有 MCP 服务器",
+          description: "添加 HTTP 或 stdio 服务器以扩展能力。",
+          buttonLabel: "添加服务器",
           category: "new-server",
         },
       ],
@@ -647,16 +647,16 @@ function buildMainSections(api: AetherExtensionAPI, servers: Record<string, Aeth
     // Runtime status summary at the top
     sections.push({
       id: "runtime",
-      title: "MCP Runtime",
-      description: `Pi MCP bridge is ${readyText}. Config: ${snapshot.configPath}`,
+      title: "MCP 运行时",
+      description: `Pi MCP 桥接${readyText}。配置：${snapshot.configPath}`,
       settings: [
-        label("runtime-summary", `${serverCount} server${serverCount === 1 ? "" : "s"} configured · ${snapshot.connectedCount} connected · ${snapshot.totalTools} tools`, `Pi MCP bridge is ${readyText}. Config file: ${snapshot.configPath}`),
+        label("runtime-summary", `已配置 ${serverCount} 个服务器 · ${snapshot.connectedCount} 个已连接 · ${snapshot.totalTools} 个工具`, `Pi MCP 桥接${readyText}。配置文件：${snapshot.configPath}`),
         {
           id: "runtime-actions",
           type: "action-row",
           actions: [
-            { label: `Reload (${serverCount} servers)`, action: "mcp:reload" },
-            { label: `Reconnect all (${snapshot.connectedCount} active)`, action: "mcp:reconnect-all" },
+            { label: `重新加载（${serverCount} 个服务器）`, action: "mcp:reload" },
+            { label: `全部重新连接（${snapshot.connectedCount} 个活动）`, action: "mcp:reconnect-all" },
           ],
         },
       ],
@@ -669,46 +669,46 @@ function buildMainSections(api: AetherExtensionAPI, servers: Record<string, Aeth
       const runtime = snapshot.servers.find((s) => s.name === name);
       const transportBadge = transport === "http" ? "STREAMABLE_HTTP" : transport === "socket" ? "UNIX_SOCKET" : "STDIO";
       const statusText = runtime?.status === "connected"
-        ? "● connected"
+        ? "● 已连接"
         : runtime?.status === "failed"
-        ? "▲ failed"
+        ? "▲ 失败"
         : runtime?.status === "needs-auth"
-        ? "🔑 auth required"
-        : "○ not connected";
-      const pillText = `${statusText} · ${runtime ? `${runtime.toolCount} tools` : "0 tools"}`;
+        ? "🔑 需要授权"
+        : "○ 未连接";
+      const pillText = `${statusText} · ${runtime ? `${runtime.toolCount} 个工具` : "0 个工具"}`;
       const inspectOutput = asString(api.storage.get(`mcp:inspect:${name}`), "");
 
       const details: Array<{ label: string; value: string }> = [
-        { label: "Server ID", value: name },
-        { label: "Transport", value: transportBadge },
+        { label: "服务器 ID", value: name },
+        { label: "传输方式", value: transportBadge },
       ];
       if (transport === "http") {
         details.push({ label: "URL", value: serverFieldValue(entry, "url") });
-        details.push({ label: "Headers", value: String(Object.keys(entry.headers || {}).length) });
-        if (entry.auth) details.push({ label: "Auth", value: authMode(entry) });
+        details.push({ label: "请求头", value: String(Object.keys(entry.headers || {}).length) });
+        if (entry.auth) details.push({ label: "身份验证", value: authMode(entry) });
       } else if (transport === "stdio") {
-        details.push({ label: "Command", value: serverFieldValue(entry, "command") });
+        details.push({ label: "命令", value: serverFieldValue(entry, "command") });
         if (Array.isArray(entry.args) && entry.args.length > 0) {
-          details.push({ label: "Arguments", value: entry.args.join(" ") });
+          details.push({ label: "参数", value: entry.args.join(" ") });
         }
-        if (entry.cwd) details.push({ label: "Working directory", value: String(entry.cwd) });
+        if (entry.cwd) details.push({ label: "工作目录", value: String(entry.cwd) });
         if (entry.env && typeof entry.env === "object") {
-          details.push({ label: "Environment", value: String(Object.keys(entry.env).length) });
+          details.push({ label: "环境变量", value: String(Object.keys(entry.env).length) });
         }
       } else {
-        details.push({ label: "Socket path", value: serverFieldValue(entry, "socket") });
+        details.push({ label: "套接字路径", value: serverFieldValue(entry, "socket") });
       }
-      details.push({ label: "Lifecycle", value: asString(entry.lifecycle, "lazy") });
+      details.push({ label: "生命周期", value: asString(entry.lifecycle, "lazy") });
       details.push({
-        label: "Request timeout",
-        value: entry.requestTimeoutMs !== undefined ? `${entry.requestTimeoutMs} ms` : "SDK default",
+        label: "请求超时",
+        value: entry.requestTimeoutMs !== undefined ? `${entry.requestTimeoutMs} ms` : "SDK 默认值",
       });
 
       const actions: Array<{ label: string; action: string; args?: AetherJsonObject; tone?: "primary" | "neutral" | "danger" }> = [
-        { label: "Tools", action: "mcp:inspect-tools", args: { serverName: name } },
-        { label: "Resources", action: "mcp:inspect-resources", args: { serverName: name } },
-        { label: "Prompts", action: "mcp:inspect-prompts", args: { serverName: name } },
-        { label: "Reconnect", action: "mcp:reconnect-server", args: { serverName: name } },
+        { label: "工具", action: "mcp:inspect-tools", args: { serverName: name } },
+        { label: "资源", action: "mcp:inspect-resources", args: { serverName: name } },
+        { label: "提示词", action: "mcp:inspect-prompts", args: { serverName: name } },
+        { label: "重新连接", action: "mcp:reconnect-server", args: { serverName: name } },
       ];
       if (transport === "http" && entry.auth !== false) {
         actions.push({ label: "OAuth", action: "mcp:auth-start", args: { serverName: name } });
@@ -733,8 +733,8 @@ function buildMainSections(api: AetherExtensionAPI, servers: Record<string, Aeth
 
     sections.push({
       id: "servers",
-      title: "Configured Servers",
-      description: "Tap any server to view details, inspect available tools, or reconnect.",
+      title: "已配置的服务器",
+      description: "点按任意服务器可查看详情、检查可用工具或重新连接。",
       settings: serverCards,
     });
   }
@@ -756,22 +756,37 @@ function oauthSection(api: AetherExtensionAPI): AetherSettingsSection | undefine
     id: "oauth",
     title: "MCP OAuth",
     settings: [
-      label("oauth-summary", `Authorize ${pending.serverName}`, "Open the authorization URL, approve access, then paste the full callback URL or code back here."),
-      link("oauth-url", "Open authorization URL", authorizationUrl, "The browser may not be able to reach the localhost callback from another device; paste the redirect URL manually below."),
-      textarea("oauth-input", "Callback URL or authorization code", "Paste the full URL from the browser address bar after approving access.", value),
-      button("oauth-complete", "Complete OAuth", "mcp:oauth-complete", { serverName: pending.serverName }, "Exchange the authorization code and reconnect the server.", "primary"),
+      label("oauth-summary", `授权 ${pending.serverName}`, "打开授权网址，批准访问，然后将完整的回调 URL 或授权码粘贴到这里。"),
+      link("oauth-url", "打开授权网址", authorizationUrl, "浏览器可能无法从另一台设备访问 localhost 回调；请将重定向 URL 手动粘贴到下方。"),
+      textarea("oauth-input", "回调 URL 或授权码", "批准访问后，从浏览器地址栏粘贴完整 URL。", value),
+      button("oauth-complete", "完成 OAuth", "mcp:oauth-complete", { serverName: pending.serverName }, "交换授权码并重新连接服务器。", "primary"),
     ],
   };
 }
 
 function transportLabel(transport: Transport): string {
   if (transport === "stdio") return "stdio";
-  if (transport === "socket") return "unix socket";
+  if (transport === "socket") return "Unix 套接字";
   return "http";
 }
 
 function statusLabel(status: McpAetherServerSnapshot["status"]): string {
-  return status.replaceAll("-", " ");
+  switch (status) {
+    case "connected":
+      return "已连接";
+    case "cached":
+      return "已缓存";
+    case "failed":
+      return "失败";
+    case "needs-auth":
+      return "需要授权";
+    case "not-connected":
+      return "未连接";
+    case "disabled":
+      return "已停用";
+    default:
+      return status.replaceAll("-", " ");
+  }
 }
 
 function emptySnapshot(): McpAetherSnapshot {
@@ -801,7 +816,7 @@ function parseOAuthObject(api: AetherExtensionAPI, prefix: string, existing: Aet
   const logoUri = stringValue(value(`${prefix}oauthLogoUri`), true);
   const grantType = value(`${prefix}oauthGrantType`);
   const skipIssuer = storedBoolean(api, `${prefix}oauthSkipIssuerValidation`, false);
-  const authorizationParams = parseRecord(value(`${prefix}oauthAuthorizationParams`), "OAuth authorizationParams");
+  const authorizationParams = parseRecord(value(`${prefix}oauthAuthorizationParams`), "OAuth 授权参数");
   const previous = existing.oauth && typeof existing.oauth === "object" && !Array.isArray(existing.oauth)
     ? existing.oauth as AetherJsonObject
     : {};
@@ -848,7 +863,7 @@ function applyRecord(entry: AetherJsonObject, field: string, raw: unknown, label
 function applyServerField(api: AetherExtensionAPI, serverName: string, field: string, raw: unknown): boolean {
   const servers = readServers();
   const entry = servers[serverName];
-  if (!entry) throw new Error(`Server "${serverName}" no longer exists.`);
+  if (!entry) throw new Error(`服务器「${serverName}」已不存在。`);
   const next: AetherJsonObject = { ...entry };
   const value = asString(raw);
   const prefix = `server:${serverName}:`;
@@ -866,11 +881,11 @@ function applyServerField(api: AetherExtensionAPI, serverName: string, field: st
       applyText(next, field, raw);
       break;
     case "args":
-      applyList(next, "args", raw, "Arguments");
+      applyList(next, "args", raw, "参数");
       break;
     case "env":
     case "headers":
-      applyRecord(next, field, raw, field === "env" ? "Environment" : "HTTP headers");
+      applyRecord(next, field, raw, field === "env" ? "环境变量" : "HTTP 请求头");
       break;
     case "httpTransport": {
       const selected = value === "streamable-http" || value === "sse" ? value : "auto";
@@ -917,7 +932,7 @@ function applyServerField(api: AetherExtensionAPI, serverName: string, field: st
       if (!trimmed) delete next.requestHeadersCommand;
       else {
         const parsed = JSON.parse(stripJsonComments(trimmed, { trailingCommas: true }));
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("requestHeadersCommand must be a JSON object.");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("requestHeadersCommand 必须是 JSON 对象。");
         next.requestHeadersCommand = parsed;
       }
       break;
@@ -949,7 +964,7 @@ function applyServerField(api: AetherExtensionAPI, serverName: string, field: st
       if (value === "all") next.directTools = true;
       else if (value === "proxy-only") next.directTools = false;
       else if (value === "custom") {
-        const list = parseList(stored(api, `${prefix}directToolsList`, ""), "Custom direct tools");
+        const list = parseList(stored(api, `${prefix}directToolsList`, ""), "自定义直接工具");
         if (list !== undefined) next.directTools = list;
         else delete next.directTools;
       } else delete next.directTools;
@@ -961,10 +976,10 @@ function applyServerField(api: AetherExtensionAPI, serverName: string, field: st
       break;
     }
     case "includeTools":
-      applyList(next, "includeTools", raw, "Include tools");
+      applyList(next, "includeTools", raw, "包含工具");
       break;
     case "excludeTools":
-      applyList(next, "excludeTools", raw, "Exclude tools");
+      applyList(next, "excludeTools", raw, "排除工具");
       break;
     case "searchKeywords": {
       const parsed = parseKeywordRecord(value);
@@ -976,7 +991,7 @@ function applyServerField(api: AetherExtensionAPI, serverName: string, field: st
       if (value === "all") next.approveTools = true;
       else if (value === "proxy-only") next.approveTools = false;
       else if (value === "custom") {
-        const list = parseList(stored(api, `${prefix}approveToolsList`, ""), "Custom approval tools");
+        const list = parseList(stored(api, `${prefix}approveToolsList`, ""), "自定义批准工具");
         if (list !== undefined) next.approveTools = list;
         else delete next.approveTools;
       } else delete next.approveTools;
@@ -1001,17 +1016,17 @@ function buildEntryFromForm(api: AetherExtensionAPI, name: string, transport: Tr
   const value = (id: string) => stored(api, id, "");
   if (transport === "stdio") {
     const command = value("new_command").trim();
-    if (!command) throw new Error("Command is required for a stdio server.");
+    if (!command) throw new Error("stdio 服务器必须填写命令。");
     entry.command = command;
-    const args = parseList(value("new_args"), "Arguments");
+    const args = parseList(value("new_args"), "参数");
     if (args !== undefined) entry.args = args;
-    const env = parseRecord(value("new_env"), "Environment");
+    const env = parseRecord(value("new_env"), "环境变量");
     if (env !== undefined) entry.env = env;
     const cwd = stringValue(value("new_cwd"), true);
     if (cwd !== undefined) entry.cwd = cwd;
   } else if (transport === "http") {
     const url = value("new_url").trim();
-    if (!url) throw new Error("URL is required for an HTTP MCP server.");
+    if (!url) throw new Error("HTTP MCP 服务器必须填写 URL。");
     entry.url = url;
     const httpTransport = value("new_httpTransport");
     if (httpTransport === "streamable-http" || httpTransport === "sse") entry.httpTransport = httpTransport;
@@ -1031,17 +1046,17 @@ function buildEntryFromForm(api: AetherExtensionAPI, name: string, transport: Tr
     if (bearerToken !== undefined) entry.bearerToken = bearerToken;
     const bearerTokenEnv = stringValue(value("new_bearerTokenEnv"), true);
     if (bearerTokenEnv !== undefined) entry.bearerTokenEnv = bearerTokenEnv;
-    const headers = parseRecord(value("new_headers"), "HTTP headers");
+    const headers = parseRecord(value("new_headers"), "HTTP 请求头");
     if (headers !== undefined) entry.headers = headers;
     const requestHeadersCommand = stringValue(value("new_requestHeadersCommand"), true);
     if (requestHeadersCommand !== undefined) {
       const parsed = JSON.parse(stripJsonComments(requestHeadersCommand, { trailingCommas: true }));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("requestHeadersCommand must be a JSON object.");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("requestHeadersCommand 必须是 JSON 对象。");
       entry.requestHeadersCommand = parsed;
     }
   } else {
     const socket = value("new_socket").trim();
-    if (!socket) throw new Error("Socket path is required for a Unix socket server.");
+    if (!socket) throw new Error("Unix 套接字服务器必须填写套接字路径。");
     entry.socket = socket;
   }
 
@@ -1060,14 +1075,14 @@ function buildEntryFromForm(api: AetherExtensionAPI, name: string, transport: Tr
   if (directTools === "all") entry.directTools = true;
   if (directTools === "proxy-only") entry.directTools = false;
   if (directTools === "custom") {
-    const list = parseList(value("new_directToolsList"), "Custom direct tools");
+    const list = parseList(value("new_directToolsList"), "自定义直接工具");
     if (list !== undefined) entry.directTools = list;
   }
   const toolPrefix = value("new_toolPrefix");
   if (toolPrefix === "server" || toolPrefix === "short" || toolPrefix === "none" || toolPrefix === "mcp") entry.toolPrefix = toolPrefix;
-  const includeTools = parseList(value("new_includeTools"), "Include tools");
+  const includeTools = parseList(value("new_includeTools"), "包含工具");
   if (includeTools !== undefined) entry.includeTools = includeTools;
-  const excludeTools = parseList(value("new_excludeTools"), "Exclude tools");
+  const excludeTools = parseList(value("new_excludeTools"), "排除工具");
   if (excludeTools !== undefined) entry.excludeTools = excludeTools;
   const searchKeywords = parseKeywordRecord(value("new_searchKeywords"));
   if (searchKeywords !== undefined) entry.searchKeywords = searchKeywords;
@@ -1075,7 +1090,7 @@ function buildEntryFromForm(api: AetherExtensionAPI, name: string, transport: Tr
   if (approveTools === "all") entry.approveTools = true;
   if (approveTools === "proxy-only") entry.approveTools = false;
   if (approveTools === "custom") {
-    const list = parseList(value("new_approveToolsList"), "Custom approval tools");
+    const list = parseList(value("new_approveToolsList"), "自定义批准工具");
     if (list !== undefined) entry.approveTools = list;
   }
   if (storedBoolean(api, "new_debug", false)) entry.debug = true;
@@ -1095,8 +1110,8 @@ function clearNewServerForm(api: AetherExtensionAPI): void {
 // ---------------------------------------------------------------------------
 
 const MCP_TOOL_TITLES = [
-  ["mcp", "Calling MCP", "Called MCP"],
-  ["mcpScript", "Running MCP script", "Ran MCP script"],
+  ["mcp", "正在调用 MCP", "已调用 MCP"],
+  ["mcpScript", "正在运行 MCP 脚本", "已运行 MCP 脚本"],
 ] as const;
 
 export const activateAether = async (aether: AetherExtensionAPI) => {
@@ -1115,7 +1130,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
     }
     for (const toolName of current) {
       if (staticToolNames.has(toolName) || dynamicToolTitleCleanups.has(toolName)) continue;
-      const cleanup = aether.registerToolTitle?.(toolName, `Calling ${toolName}`, `Called ${toolName}`, 100);
+      const cleanup = aether.registerToolTitle?.(toolName, `正在调用 ${toolName}`, `已调用 ${toolName}`, 100);
       if (typeof cleanup === "function") dynamicToolTitleCleanups.set(toolName, cleanup);
     }
   };
@@ -1196,8 +1211,8 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 
     const definition: AetherSettingsDefinition = {
       id: PAGE_ID,
-      title: "MCP Servers",
-      subtitle: "Manage MCP servers, inspect each transport config, and keep only the connections you want active.",
+      title: "MCP 服务器",
+      subtitle: "管理 MCP 服务器，查看各传输配置，只保留需要保持活动的连接。",
       icon: "auto",
       order: 30,
       trailingIcon: "add",
@@ -1206,8 +1221,8 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
       categories: [
         {
           id: "new-server",
-          title: "Add MCP server",
-          subtitle: `Writes to ${snapshot.configPath}`,
+          title: "添加 MCP 服务器",
+          subtitle: `写入 ${snapshot.configPath}`,
           icon: "auto",
           order: 10,
           trailingIcon: "none",
@@ -1246,7 +1261,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
           {
             id: "general",
             title: "MCP",
-            subtitle: "Runtime and OAuth",
+            subtitle: "运行时与 OAuth",
             icon: "auto",
             order: 1,
             sections: definition.sections ?? [],
@@ -1273,14 +1288,14 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
       const checked = payload.checked !== undefined ? Boolean(payload.checked) : payload.value !== false;
       const servers = readServers();
       const entry = servers[serverName];
-      if (!entry) throw new Error(`Server "${serverName}" not found.`);
+      if (!entry) throw new Error(`找不到服务器「${serverName}」。`);
       if (checked) {
         delete entry.disabled;
       } else {
         entry.disabled = true;
       }
       writeServers({ ...servers, [serverName]: entry });
-      aether.notify(`MCP server "${serverName}" ${checked ? "enabled" : "disabled"}.`, "info");
+      aether.notify(`MCP 服务器「${serverName}」已${checked ? "启用" : "停用"}。`, "info");
       scheduleRefresh(true);
       return { ok: true, name: serverName, enabled: checked };
     } catch (error) {
@@ -1292,7 +1307,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 
   const handleInspect = async (serverName: string, kind: "tools" | "resources" | "prompts") => {
     try {
-      const result = await withBridge((bridge) => bridge.inspect(serverName, kind), "The Pi MCP extension is not loaded yet.");
+      const result = await withBridge((bridge) => bridge.inspect(serverName, kind), "Pi MCP 插件尚未加载。");
       const details = result.details || result.message;
       aether.storage.set(`mcp:inspect:${serverName}`, details);
       aether.notify(result.message, result.ok ? "info" : "warning");
@@ -1300,7 +1315,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      aether.storage.set(`mcp:inspect:${serverName}`, `Inspection failed: ${message}`);
+      aether.storage.set(`mcp:inspect:${serverName}`, `检查失败：${message}`);
       aether.notify(`MCP: ${message}`, "error");
       scheduleRefresh(true);
       return { ok: false, error: message };
@@ -1328,11 +1343,11 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
       const transportRaw = stored(aether, "new_transport", "stdio");
       const transport: Transport = transportRaw === "http" ? "http" : transportRaw === "socket" ? "socket" : "stdio";
       const servers = readServers();
-      if (servers[name]) throw new Error(`Server "${name}" already exists.`);
+      if (servers[name]) throw new Error(`服务器「${name}」已存在。`);
       const entry = buildEntryFromForm(aether, name, transport);
       writeServers({ ...servers, [name]: entry });
       clearNewServerForm(aether);
-      aether.notify(`MCP server "${name}" added. Tap Reload MCP extension to connect.`, "info");
+      aether.notify(`已添加 MCP 服务器「${name}」。点「重新加载」后即可连接。`, "info");
       scheduleRefresh(true);
       return { ok: true, name };
     } catch (error) {
@@ -1346,11 +1361,11 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
     try {
       const name = validateServerName(asString(payload.serverName));
       const servers = readServers();
-      if (!servers[name]) throw new Error(`Server "${name}" does not exist in ${configPath()}.`);
+      if (!servers[name]) throw new Error(`服务器「${name}」在 ${configPath()} 中不存在。`);
       delete servers[name];
       writeServers(servers);
       clearServerStorage(aether, name);
-      aether.notify(`MCP server "${name}" removed. Tap Reload MCP extension to apply.`, "info");
+      aether.notify(`已删除 MCP 服务器「${name}」。点「重新加载」后即可生效。`, "info");
       scheduleRefresh(true);
       return { ok: true, name };
     } catch (error) {
@@ -1365,11 +1380,11 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
       const name = validateServerName(asString(payload.serverName));
       const nextName = validateServerName(stored(aether, `server:${name}:renameTo`, ""));
       const servers = readServers();
-      if (!servers[name]) throw new Error(`Server "${name}" does not exist.`);
-      if (servers[nextName]) throw new Error(`Server "${nextName}" already exists.`);
+      if (!servers[name]) throw new Error(`服务器「${name}」不存在。`);
+      if (servers[nextName]) throw new Error(`服务器「${nextName}」已存在。`);
       writeServers({ ...Object.fromEntries(Object.entries(servers).filter(([key]) => key !== name)), [nextName]: servers[name] as AetherJsonObject });
       clearServerStorage(aether, name);
-      aether.notify(`MCP server "${name}" renamed to "${nextName}". Tap Reload MCP extension to apply.`, "info");
+      aether.notify(`已将 MCP 服务器「${name}」重命名为「${nextName}」。点「重新加载」后即可生效。`, "info");
       scheduleRefresh(true);
       return { ok: true, name: nextName };
     } catch (error) {
@@ -1387,8 +1402,8 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 
   aether.registerAction("mcp:reload", async () => {
     try {
-      const result = await withBridge((bridge) => bridge.reload(), "The Pi MCP extension is not loaded yet.");
-      if (result.ok) aether.notify("MCP extension reloading.", "info");
+      const result = await withBridge((bridge) => bridge.reload(), "Pi MCP 插件尚未加载。");
+      if (result.ok) aether.notify("正在重新加载 MCP 插件。", "info");
       else aether.notify(`MCP: ${result.message}`, "warning");
       return result;
     } catch (error) {
@@ -1400,7 +1415,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 
   aether.registerAction("mcp:reconnect-all", async () => {
     try {
-      const result = await withBridge((bridge) => bridge.reconnectAll(), "The Pi MCP extension is not loaded yet.");
+      const result = await withBridge((bridge) => bridge.reconnectAll(), "Pi MCP 插件尚未加载。");
       aether.notify(result.message, result.ok ? "info" : "warning");
       scheduleRefresh(true);
       return result;
@@ -1414,7 +1429,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
   aether.registerAction("mcp:reconnect-server", async (payload) => {
     try {
       const name = validateServerName(asString(payload.serverName));
-      const result = await withBridge((bridge) => bridge.reconnect(name), "The Pi MCP extension is not loaded yet.");
+      const result = await withBridge((bridge) => bridge.reconnect(name), "Pi MCP 插件尚未加载。");
       aether.notify(result.message, result.ok ? "info" : "warning");
       scheduleRefresh(true);
       return result;
@@ -1428,11 +1443,11 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
   aether.registerAction("mcp:auth-start", async (payload) => {
     try {
       const name = validateServerName(asString(payload.serverName));
-      const result = await withBridge((bridge) => bridge.startAuth(name), "The Pi MCP extension is not loaded yet.");
+      const result = await withBridge((bridge) => bridge.startAuth(name), "Pi MCP 插件尚未加载。");
       if (result.ok && result.authorizationUrl) {
         aether.storage.set(BRIDGE_OAUTH_KEY, { serverName: name, authorizationUrl: result.authorizationUrl, startedAt: Date.now() });
         clearSetting(aether, "oauth-input");
-        aether.notify("Authorization URL ready. Open it, approve access, then paste the callback URL back here.", "info");
+        aether.notify("授权网址已就绪。打开并批准访问后，将回调 URL 粘贴到这里。", "info");
       } else {
         aether.notify(result.message, result.ok ? "info" : "warning");
       }
@@ -1449,8 +1464,8 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
     try {
       const name = validateServerName(asString(payload.serverName));
       const input = stored(aether, "oauth-input", "").trim();
-      if (!input) throw new Error("Paste the full callback URL or authorization code first.");
-      const result = await withBridge((bridge) => bridge.completeAuth(name, input), "The Pi MCP extension is not loaded yet.");
+      if (!input) throw new Error("请先粘贴完整的回调 URL 或授权码。");
+      const result = await withBridge((bridge) => bridge.completeAuth(name, input), "Pi MCP 插件尚未加载。");
       aether.storage.delete(BRIDGE_OAUTH_KEY);
       clearSetting(aether, "oauth-input");
       aether.notify(result.message, result.ok ? "info" : "warning");
@@ -1466,7 +1481,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
   aether.registerAction("mcp:oauth-logout", async (payload) => {
     try {
       const name = validateServerName(asString(payload.serverName));
-      const result = await withBridge((bridge) => bridge.logout(name), "The Pi MCP extension is not loaded yet.");
+      const result = await withBridge((bridge) => bridge.logout(name), "Pi MCP 插件尚未加载。");
       aether.notify(result.message, result.ok ? "info" : "warning");
       scheduleRefresh(true);
       return result;

@@ -383,33 +383,33 @@ function normalizeSettingValue(id: string, raw: unknown): SettingValue {
 
 function joinModeOptions() {
 	return [
-		{ value: "smart", label: "Smart" },
-		{ value: "async", label: "Async" },
-		{ value: "group", label: "Group" },
+		{ value: "smart", label: "智能" },
+		{ value: "async", label: "异步" },
+		{ value: "group", label: "分组" },
 	];
 }
 
 function widgetModeOptions() {
 	return [
-		{ value: "all", label: "All agents" },
-		{ value: "background", label: "Background only" },
-		{ value: "off", label: "Off" },
+		{ value: "all", label: "所有代理" },
+		{ value: "background", label: "仅后台" },
+		{ value: "off", label: "关闭" },
 	];
 }
 
 function agentMentionOptions() {
 	return [
-		{ value: "model", label: "Model" },
-		{ value: "direct", label: "Direct" },
-		{ value: "off", label: "Off" },
+		{ value: "model", label: "经由模型" },
+		{ value: "direct", label: "直接" },
+		{ value: "off", label: "关闭" },
 	];
 }
 
 function toolDescriptionOptions() {
 	return [
-		{ value: "full", label: "Full" },
-		{ value: "compact", label: "Compact" },
-		{ value: "custom", label: "Custom" },
+		{ value: "full", label: "完整" },
+		{ value: "compact", label: "精简" },
+		{ value: "custom", label: "自定义" },
 	];
 }
 
@@ -423,49 +423,49 @@ function settingsDefinition(): {
 } {
 	return {
 		id: SETTINGS_PAGE_ID,
-		title: "Subagents",
-		subtitle: "Subagent concurrency, dispatch, persistence, and Aether UI",
+		title: "子代理",
+		subtitle: "子代理并发数、调度、持久化与 Aether 界面",
 		icon: "auto",
 		order: 30,
 		sections: [
 			{
 				id: "runtime",
-				title: "Runtime",
+				title: "运行时",
 				settings: [
-					{ id: "maxConcurrent", label: "Max concurrency", description: "Maximum concurrent background agents. Queued agents start as slots free.", type: "number", min: 1, max: MAX_CONCURRENT_CEILING },
-					{ id: "defaultMaxTurns", label: "Default max turns", description: "Default maximum agentic turns before wrap-up. 0 means unlimited.", type: "number", min: 0, max: MAX_TURNS_CEILING },
-					{ id: "graceTurns", label: "Grace turns", description: "Additional turns after the wrap-up steering message.", type: "number", min: 1, max: GRACE_TURNS_CEILING },
-					{ id: "maxSubagentDepth", label: "Nested depth", description: "Hard cap on nested delegation. Main is 0; 0 or 1 disables nesting.", type: "number", min: 0, max: SUBAGENT_DEPTH_CEILING },
-					{ id: "joinMode", label: "Join mode", description: "Default completion grouping for background agents.", type: "select", options: joinModeOptions() },
-					{ id: "schedulingEnabled", label: "Scheduling", description: "Enable the schedule parameter and scheduled-job menu. Tool-spec changes apply on the next Pi session.", type: "toggle" },
-					{ id: "outputTranscript", label: "Output transcript", description: "Write each subagent .output transcript by default. Agent frontmatter can override this.", type: "toggle" },
+					{ id: "maxConcurrent", label: "最大并发数", description: "后台代理的最大并发数量。排队中的代理会在有空位时启动。", type: "number", min: 1, max: MAX_CONCURRENT_CEILING },
+					{ id: "defaultMaxTurns", label: "默认最大轮数", description: "收尾前代理默认可执行的最大轮数。0 表示不限制。", type: "number", min: 0, max: MAX_TURNS_CEILING },
+					{ id: "graceTurns", label: "宽限轮数", description: "发送收尾引导消息后额外允许的轮数。", type: "number", min: 1, max: GRACE_TURNS_CEILING },
+					{ id: "maxSubagentDepth", label: "嵌套深度", description: "嵌套委派的硬性上限。主代理为 0；设为 0 或 1 即停用嵌套。", type: "number", min: 0, max: SUBAGENT_DEPTH_CEILING },
+					{ id: "joinMode", label: "汇合模式", description: "后台代理完成结果的默认分组方式。", type: "select", options: joinModeOptions() },
+					{ id: "schedulingEnabled", label: "定时任务", description: "启用 schedule 参数和定时任务菜单。工具定义的变更将在下一个 Pi 会话生效。", type: "toggle" },
+					{ id: "outputTranscript", label: "输出记录", description: "默认为每个子代理写入 .output 记录文件。代理 frontmatter 可覆盖此设置。", type: "toggle" },
 				],
 			},
 			{
 				id: "agents",
-				title: "Agents",
+				title: "代理",
 				settings: [
-					{ id: "disableDefaultAgents", label: "Disable defaults", description: "Hide built-in general-purpose, Explore, and Plan agents. Custom agents are unaffected.", type: "toggle" },
-					{ id: "fallbackSubagent", label: "Fallback agent", description: "Agent used when subagent_type is unknown, disabled, or ambiguous. none rejects the call instead.", type: "text", placeholder: "general-purpose", default: "general-purpose" },
-					{ id: "strictAgentFiles", label: "Strict agent files", description: "Fail startup on an unreadable or unparseable agent .md file instead of skipping it.", type: "toggle" },
-					{ id: "toolDescriptionMode", label: "Tool description", description: "Agent tool description size/mode. Custom reads .pi/agent-tool-description.md.", type: "select", options: toolDescriptionOptions() },
+					{ id: "disableDefaultAgents", label: "停用内置代理", description: "隐藏内置的 general-purpose、Explore 和 Plan 代理。自定义代理不受影响。", type: "toggle" },
+					{ id: "fallbackSubagent", label: "备用代理", description: "subagent_type 未知、已停用或有歧义时使用的代理。设为 none 则直接拒绝调用。", type: "text", placeholder: "general-purpose", default: "general-purpose" },
+					{ id: "strictAgentFiles", label: "严格校验代理文件", description: "遇到无法读取或解析的代理 .md 文件时直接启动失败，而不是跳过。", type: "toggle" },
+					{ id: "toolDescriptionMode", label: "工具描述", description: "Agent 工具描述的篇幅/模式。自定义模式读取 .pi/agent-tool-description.md。", type: "select", options: toolDescriptionOptions() },
 				],
 			},
 			{
 				id: "models",
-				title: "Models",
+				title: "模型",
 				settings: [
-					{ id: "scopeModels", label: "Scope models", description: "Validate subagent model choices against Pi scoped models (/scoped-models).", type: "toggle" },
+					{ id: "scopeModels", label: "限定模型范围", description: "根据 Pi 限定模型（/scoped-models）校验子代理选用的模型。", type: "toggle" },
 				],
 			},
 			{
 				id: "ui",
-				title: "Aether and Pi UI",
+				title: "Aether 与 Pi 界面",
 				settings: [
-					{ id: "widgetMode", label: "Widget", description: "Live Aether agent card visibility above the composer.", type: "select", options: widgetModeOptions() },
-					{ id: "fleetView", label: "Fleet view", description: "Keep the TUI FleetView enabled for Pi CLI; Aether renders the same roster as tappable cards.", type: "toggle" },
-					{ id: "agentMentions", label: "Agent mentions", description: "Route @handle messages to that agent. Model starts new agents through an off-screen clone; direct starts them immediately.", type: "select", options: agentMentionOptions() },
-					{ id: "rememberAgents", label: "Remember agents", description: "Persist subagent sessions so @handle can resume them long after completion.", type: "toggle" },
+					{ id: "widgetMode", label: "小组件", description: "输入框上方实时 Aether 代理卡片的显示范围。", type: "select", options: widgetModeOptions() },
+					{ id: "fleetView", label: "代理列表视图", description: "为 Pi CLI 保持启用 TUI FleetView；Aether 会将同一列表渲染为可点按的卡片。", type: "toggle" },
+					{ id: "agentMentions", label: "代理提及", description: "将 @handle 消息转给对应代理。“经由模型”通过后台副本启动新代理；“直接”则立即启动。", type: "select", options: agentMentionOptions() },
+					{ id: "rememberAgents", label: "记住代理", description: "持久保存子代理会话，使 @handle 在完成很久之后仍可继续该会话。", type: "toggle" },
 				],
 			},
 		],
@@ -500,7 +500,7 @@ async function applySettingAction(api: AetherExtensionAPI, id: string, payload: 
 	api.invalidate?.();
 	const message = applied?.ok && applied.message
 		? applied.message
-		: `Subagent setting updated.${["disableDefaultAgents", "strictAgentFiles", "toolDescriptionMode", "schedulingEnabled"].includes(id) ? " Some changes apply on the next Pi session." : ""}`;
+		: `子代理设置已更新。${["disableDefaultAgents", "strictAgentFiles", "toolDescriptionMode", "schedulingEnabled"].includes(id) ? "部分变更将在下一个 Pi 会话生效。" : ""}`;
 	api.notify?.(message, "info");
 	return { setting: id, value };
 }
@@ -524,6 +524,40 @@ function statusTone(status: string): "neutral" | "error" {
 	return status === "error" || status === "stopped" || status === "aborted" ? "error" : "neutral";
 }
 
+function sourceLabel(source: string): string {
+	switch (source) {
+		case "default":
+			return "内置";
+		case "project":
+			return "项目";
+		case "global":
+			return "全局";
+		default:
+			return source;
+	}
+}
+
+function statusLabel(status: string): string {
+	switch (status) {
+		case "running":
+			return "运行中";
+		case "queued":
+			return "排队中";
+		case "completed":
+			return "已完成";
+		case "error":
+			return "出错";
+		case "stopped":
+			return "已停止";
+		case "aborted":
+			return "已中止";
+		case "steered":
+			return "已引导";
+		default:
+			return status;
+	}
+}
+
 function formatMs(ms: number): string {
 	if (ms < 1000) return `${ms}ms`;
 	const totalSeconds = Math.round(ms / 1000);
@@ -537,7 +571,7 @@ function notificationCard(api: AetherExtensionAPI, message: AetherJsonObject) {
 	const details = message.details && typeof message.details === "object"
 		? message.details as AetherJsonObject
 		: message;
-	const description = typeof details.description === "string" ? details.description : "Subagent";
+	const description = typeof details.description === "string" ? details.description : "子代理";
 	const status = typeof details.status === "string" ? details.status : "completed";
 	const fallbackResult = messageText(message);
 	const others = Array.isArray(details.others) ? details.others.filter((entry): entry is AetherJsonObject => !!entry && typeof entry === "object" && !Array.isArray(entry)) : [];
@@ -545,8 +579,8 @@ function notificationCard(api: AetherExtensionAPI, message: AetherJsonObject) {
 		const entryStatus = typeof entry.status === "string" ? entry.status : status;
 		const entryDescription = typeof entry.description === "string" ? entry.description : description;
 		const entryParts = [
-			typeof entry.turnCount === "number" && entry.turnCount > 0 ? `${entry.turnCount} turns` : "",
-			typeof entry.toolUses === "number" && entry.toolUses > 0 ? `${entry.toolUses} tool uses` : "",
+			typeof entry.turnCount === "number" && entry.turnCount > 0 ? `${entry.turnCount} 轮` : "",
+			typeof entry.toolUses === "number" && entry.toolUses > 0 ? `${entry.toolUses} 次工具` : "",
 			typeof entry.totalTokens === "number" && entry.totalTokens > 0 ? `${entry.totalTokens} tokens` : "",
 			typeof entry.durationMs === "number" && entry.durationMs > 0 ? formatMs(Number(entry.durationMs)) : "",
 		].filter(Boolean);
@@ -554,8 +588,8 @@ function notificationCard(api: AetherExtensionAPI, message: AetherJsonObject) {
 		const entryOutputFile = typeof entry.outputFile === "string" ? entry.outputFile : "";
 		return api.ui.card([
 			api.ui.row([
-				api.ui.text("Subagent complete", { style: "label", weight: "bold", color: statusTone(entryStatus) === "error" ? "error" : "accent" }),
-				api.ui.text(entryStatus, { style: "caption", color: statusTone(entryStatus) === "error" ? "error" : "muted" }),
+				api.ui.text("子代理已完成", { style: "label", weight: "bold", color: statusTone(entryStatus) === "error" ? "error" : "accent" }),
+				api.ui.text(statusLabel(entryStatus), { style: "caption", color: statusTone(entryStatus) === "error" ? "error" : "muted" }),
 			], { arrangement: "space-between", verticalAlignment: "center" }),
 			api.ui.text(`${entryStatus === "error" || entryStatus === "stopped" || entryStatus === "aborted" ? "✗" : "✓"} ${entryDescription}`, { weight: "semibold" }),
 			...(entryParts.length ? [api.ui.text(entryParts.join(" · "), { style: "caption", color: "muted" })] : []),
@@ -568,18 +602,18 @@ function notificationCard(api: AetherExtensionAPI, message: AetherJsonObject) {
 
 function resultCard(api: AetherExtensionAPI, message: AetherJsonObject) {
 	const text = messageText(message);
-	const description = typeof message.description === "string" ? message.description : "Subagent result";
+	const description = typeof message.description === "string" ? message.description : "子代理结果";
 	return api.ui.card([
 		api.ui.text(description, { style: "title" }),
-		...(text ? [api.ui.code(text, { maxLines: 40 })] : [api.ui.text("No output.", { color: "muted" })]),
+		...(text ? [api.ui.code(text, { maxLines: 40 })] : [api.ui.text("没有输出。", { color: "muted" })]),
 	], { radius: 14 });
 }
 
 function conversationCard(api: AetherExtensionAPI, message: AetherJsonObject) {
 	const text = messageText(message);
 	return api.ui.card([
-		api.ui.text("Subagent conversation", { style: "title" }),
-		...(text ? [api.ui.code(text, { maxLines: 80 })] : [api.ui.text("No conversation available.", { color: "muted" })]),
+		api.ui.text("子代理对话", { style: "title" }),
+		...(text ? [api.ui.code(text, { maxLines: 80 })] : [api.ui.text("没有可用对话。", { color: "muted" })]),
 	], { radius: 14 });
 }
 
@@ -600,7 +634,7 @@ function liveAgentsCard(api: AetherExtensionAPI): AetherView {
 	if (visible.length === 0) return null;
 
 	const rows = visible.slice(0, 6).map((agent) => {
-		const statusText = agent.status === "queued" ? "queued" : agent.status;
+		const statusText = statusLabel(agent.status);
 		const color = agent.status === "error" || agent.status === "stopped" || agent.status === "aborted"
 			? "error"
 			: agent.status === "completed" || agent.status === "steered"
@@ -608,18 +642,18 @@ function liveAgentsCard(api: AetherExtensionAPI): AetherView {
 				: "accent";
 		const stats = [
 			agent.activity,
-			agent.turnCount > 0 ? `${agent.turnCount} turns` : "",
-			agent.toolUses > 0 ? `${agent.toolUses} tools` : "",
+			agent.turnCount > 0 ? `${agent.turnCount} 轮` : "",
+			agent.toolUses > 0 ? `${agent.toolUses} 次工具` : "",
 			agent.tokens,
 			agent.durationMs > 0 ? formatMs(agent.durationMs) : "",
 		].filter(Boolean).join(" · ");
 		const buttons: AetherView[] = [];
 		if (agent.status === "running" || agent.status === "queued") {
-			buttons.push(api.ui.button("View", "agent-view", { args: { id: agent.id }, tone: "neutral", icon: "info" }));
-			buttons.push(api.ui.button("Stop", "agent-stop", { args: { id: agent.id }, tone: "danger" }));
+			buttons.push(api.ui.button("查看", "agent-view", { args: { id: agent.id }, tone: "neutral", icon: "info" }));
+			buttons.push(api.ui.button("停止", "agent-stop", { args: { id: agent.id }, tone: "danger" }));
 		} else {
-			buttons.push(api.ui.button("Result", "agent-result", { args: { id: agent.id }, tone: "neutral" }));
-			buttons.push(api.ui.button("Conversation", "agent-view", { args: { id: agent.id }, tone: "neutral" }));
+			buttons.push(api.ui.button("结果", "agent-result", { args: { id: agent.id }, tone: "neutral" }));
+			buttons.push(api.ui.button("对话", "agent-view", { args: { id: agent.id }, tone: "neutral" }));
 		}
 		return api.ui.card([
 			api.ui.row([
@@ -634,11 +668,11 @@ function liveAgentsCard(api: AetherExtensionAPI): AetherView {
 	const remaining = visible.length - rows.length;
 	return api.ui.card([
 		api.ui.row([
-			api.ui.text("Agents", { style: "title" }),
-			api.ui.text(`${snapshot.running} running · ${snapshot.queued} queued`, { style: "caption", color: "muted" }),
+			api.ui.text("代理", { style: "title" }),
+			api.ui.text(`${snapshot.running} 个运行中 · ${snapshot.queued} 个排队`, { style: "caption", color: "muted" }),
 		], { arrangement: "space-between", verticalAlignment: "center" }),
 		...rows,
-		...(remaining > 0 ? [api.ui.text(`${remaining} more agent${remaining === 1 ? "" : "s"}`, { style: "caption", color: "muted" })] : []),
+		...(remaining > 0 ? [api.ui.text(`还有 ${remaining} 个代理`, { style: "caption", color: "muted" })] : []),
 	], { radius: 18, contentPadding: 14 });
 }
 
@@ -658,22 +692,22 @@ function viewerOverlay(api: AetherExtensionAPI, context: AetherRenderContext): A
 		children: [
 			api.ui.card([
 				api.ui.row([
-					api.ui.text(agent ? `${agent.displayName} — ${agent.description || agent.type}` : "Subagent unavailable", { style: "title" }),
-					api.ui.button("Close", "viewer-close", { tone: "neutral" }),
+					api.ui.text(agent ? `${agent.displayName} — ${agent.description || agent.type}` : "子代理不可用", { style: "title" }),
+					api.ui.button("关闭", "viewer-close", { tone: "neutral" }),
 				], { arrangement: "space-between", verticalAlignment: "center", wrap: true, rowSpacing: 8 }),
 				...(agent ? [
-					api.ui.text(`${agent.status} · ${agent.toolUses} tool uses · ${agent.tokens} · ${formatMs(agent.durationMs)}`, { style: "caption", color: "muted" }),
+					api.ui.text(`${statusLabel(agent.status)} · ${agent.toolUses} 次工具 · ${agent.tokens} · ${formatMs(agent.durationMs)}`, { style: "caption", color: "muted" }),
 					(agent.status === "running" || agent.status === "queued")
 						? api.ui.input("", "agent-steer", {
 							args: { id: agent.id },
-							placeholder: "Message this agent, then press Done",
+							placeholder: "给此代理发送消息，然后点完成",
 							singleLine: false,
 						})
 						: null,
 				] : []),
-				...(conversation ? [api.ui.code(conversation, { fontSize: 12 })] : [api.ui.text("No conversation available yet.", { color: "muted" })]),
+				...(conversation ? [api.ui.code(conversation, { fontSize: 12 })] : [api.ui.text("还没有可用对话。", { color: "muted" })]),
 				...(agent && (agent.status === "running" || agent.status === "queued")
-					? [api.ui.button("Stop agent", "agent-stop", { args: { id: agent.id }, tone: "danger" })]
+					? [api.ui.button("停止代理", "agent-stop", { args: { id: agent.id }, tone: "danger" })]
 					: []),
 			], { radius: 22, contentPadding: 16, width: "fill", maxHeight: 720 }),
 		],
@@ -687,18 +721,18 @@ function fallbackActivityCard(api: AetherExtensionAPI, context: AetherRenderCont
 	const activity = latest as AetherJsonObject;
 	return api.ui.column([
 		api.ui.card([
-			api.ui.text(typeof activity.title === "string" ? activity.title : "Subagent activity", { style: "label", weight: "bold" }),
+			api.ui.text(typeof activity.title === "string" ? activity.title : "子代理动态", { style: "label", weight: "bold" }),
 			...(typeof activity.text === "string" && activity.text ? [api.ui.text(activity.text, { maxLines: 6 })] : []),
 		]),
-		api.ui.button("Dismiss", "dismiss-activity", { tone: "neutral" }),
+		api.ui.button("关闭", "dismiss-activity", { tone: "neutral" }),
 	], { spacing: 6 });
 }
 
 function messageTypes(api: AetherExtensionAPI): AetherMessageTypeDefinition[] {
 	return [
-		{ type: "subagent-notification", title: "Subagent complete", icon: "auto", render: ({ message }) => notificationCard(api, message) },
-		{ type: "subagent-result", title: "Subagent result", icon: "info", render: ({ message }) => resultCard(api, message) },
-		{ type: "subagent-conversation", title: "Subagent conversation", icon: "terminal", render: ({ message }) => conversationCard(api, message) },
+		{ type: "subagent-notification", title: "子代理已完成", icon: "auto", render: ({ message }) => notificationCard(api, message) },
+		{ type: "subagent-result", title: "子代理结果", icon: "info", render: ({ message }) => resultCard(api, message) },
+		{ type: "subagent-conversation", title: "子代理对话", icon: "terminal", render: ({ message }) => conversationCard(api, message) },
 	];
 }
 
@@ -712,7 +746,7 @@ export async function appendAetherSubagentMessage(
 	try {
 		bridge.api.storage.set("latestSubagentActivity", {
 			type,
-			title: type === "subagent-notification" ? "Subagent complete" : "Subagent activity",
+			title: type === "subagent-notification" ? "子代理已完成" : "子代理动态",
 			text: text.slice(0, 2000),
 			at: Date.now(),
 		});
@@ -728,13 +762,13 @@ export async function appendAetherSubagentMessage(
 
 async function runAgentAction(api: AetherExtensionAPI, action: string, payload: AetherJsonObject, context?: AetherRenderContext): Promise<unknown> {
 	const bridge = readBridge();
-	if (!bridge) return { ok: false, error: "The pi-subagents Pi extension is not loaded." };
+	if (!bridge) return { ok: false, error: "pi-subagents 插件尚未加载。" };
 	const id = typeof payload.id === "string" ? payload.id : "";
 	switch (action) {
 		case "agent-stop": {
 			if (!id) return { ok: false };
 			const stopped = bridge.abort(id);
-			api.notify?.(stopped ? "Subagent stopped." : "Subagent is no longer running.", stopped ? "info" : "warning");
+			api.notify?.(stopped ? "已停止子代理。" : "该子代理已不在运行。", stopped ? "info" : "warning");
 			api.invalidate?.();
 			return { ok: stopped, id };
 		}
@@ -742,7 +776,7 @@ async function runAgentAction(api: AetherExtensionAPI, action: string, payload: 
 			const message = typeof payload.value === "string" ? payload.value.trim() : "";
 			if (!id || !message) return { ok: false };
 			const steered = bridge.steer(id, message);
-			api.notify?.(steered ? `Message sent to ${id}.` : "That agent is not running.", steered ? "info" : "warning");
+			api.notify?.(steered ? `已向 ${id} 发送消息。` : "该代理未在运行。", steered ? "info" : "warning");
 			api.invalidate?.();
 			return { ok: steered, id };
 		}
@@ -778,16 +812,16 @@ async function runAgentAction(api: AetherExtensionAPI, action: string, payload: 
 		}
 		case "agent-reload": {
 			bridge.reloadAgents();
-			api.notify?.("Reloaded subagent definitions.", "info");
+			api.notify?.("已重新加载子代理定义。", "info");
 			api.invalidate?.();
 			bridge.onTypesChanged?.();
 			return { ok: true };
 		}
 		case "agent-create": {
-			const prompt = "Create a custom pi subagent definition at .pi/agents/<name>.md with YAML frontmatter (description, tools, model, thinking) and a system prompt body. Ask me for the agent name and what it should do if I have not already told you.";
+			const prompt = "请在 .pi/agents/<name>.md 创建一个自定义 Pi 子代理定义，包含 YAML frontmatter（description、tools、model、thinking）和系统提示正文。如果我还没说明代理名称和职责，请先问我。";
 			await api.host.invoke("app.openScreen", { screen: "chat" });
 			await api.host.invoke("app.appendDraftInput", { text: prompt });
-			api.notify?.("Subagent definition prompt added to the composer.", "info");
+			api.notify?.("已将子代理定义提示加入输入框。", "info");
 			return { ok: true };
 		}
 		default:
@@ -798,9 +832,9 @@ async function runAgentAction(api: AetherExtensionAPI, action: string, payload: 
 // ---- Aether activation ------------------------------------------------------
 
 const SUBAGENT_TOOL_TITLES = [
-	["Agent", "Running subagent", "Ran subagent"],
-	["get_subagent_result", "Checking subagent result", "Checked subagent result"],
-	["steer_subagent", "Steering subagent", "Steered subagent"],
+	["Agent", "正在运行子代理", "已运行子代理"],
+	["get_subagent_result", "正在查看子代理结果", "已查看子代理结果"],
+	["steer_subagent", "正在引导子代理", "已引导子代理"],
 ] as const;
 
 export const activateAether = async (api: AetherExtensionAPI) => {
@@ -836,7 +870,7 @@ export const activateAether = async (api: AetherExtensionAPI) => {
 			label: type.displayName,
 			description: [
 				type.description,
-				`${type.source}${type.isDefault ? " default" : ""}`,
+				`${sourceLabel(type.source)}${type.isDefault ? "（默认）" : ""}`,
 			].filter(Boolean).join("\n"),
 			type: "toggle" as const,
 			default: type.enabled,
@@ -844,24 +878,24 @@ export const activateAether = async (api: AetherExtensionAPI) => {
 		const typeSections: AetherSettingsSection[] = typeSettings.length > 0
 			? [{
 				id: "types",
-				title: "Agent types",
-				description: "Enable or disable individual agent types. Disabled built-ins get a project stub; disabled custom agents keep their file.",
+				title: "代理类型",
+				description: "启用或停用各个代理类型。停用内置代理会生成项目占位；停用自定义代理会保留其文件。",
 				settings: typeSettings,
 			}]
 			: [];
 		const definition = {
 			id: AGENTS_PAGE_ID,
-			title: "Subagent Types",
-			subtitle: "Enable, disable, and reload custom agent definitions",
+			title: "子代理类型",
+			subtitle: "启用、停用并重新加载自定义代理定义",
 			icon: "auto",
 			order: 31,
 			sections: [
 				{
 					id: "manage",
-					title: "Manage",
+					title: "管理",
 					settings: [
-						{ id: "create", label: "Create agent definition", description: "Add a prompt to the composer asking the main model to create .pi/agents/<name>.md.", type: "button" as const, action: "agent-create", tone: "primary" as const, icon: "add" },
-						{ id: "reload", label: "Reload agent files", description: "Re-read project, workspace, and personal agent definitions now.", type: "button" as const, action: "agent-reload", tone: "neutral" as const, icon: "refresh" },
+						{ id: "create", label: "创建代理定义", description: "向输入框添加提示，让主模型创建 .pi/agents/<name>.md。", type: "button" as const, action: "agent-create", tone: "primary" as const, icon: "add" },
+						{ id: "reload", label: "重新加载代理文件", description: "立即重新读取项目、工作区和个人代理定义。", type: "button" as const, action: "agent-reload", tone: "neutral" as const, icon: "refresh" },
 					],
 				},
 				...typeSections,
@@ -877,7 +911,7 @@ export const activateAether = async (api: AetherExtensionAPI) => {
 			const settingId = typeSettingId(type.name);
 			api.registerAction(`settings:${AGENTS_PAGE_ID}:${settingId}`, async (payload) => {
 				const nextEnabled = payload.checked === true || payload.value === true || payload.value === "true";
-				const result = bridge?.toggleAgent(type.name) ?? { ok: false, message: "The pi-subagents Pi extension is not loaded." };
+				const result = bridge?.toggleAgent(type.name) ?? { ok: false, message: "pi-subagents 插件尚未加载。" };
 				if (result.ok) {
 					api.storage.set(typeSettingStorageKey(settingId), nextEnabled);
 					api.notify?.(result.message, "info");
@@ -920,8 +954,8 @@ export const activateAether = async (api: AetherExtensionAPI) => {
 
 	api.registerComposerMenuItem({
 		id: "subagents",
-		title: "Subagents",
-		subtitle: "Draft a subagent creation request",
+		title: "子代理",
+		subtitle: "起草一份子代理创建请求",
 		icon: "auto",
 		order: 20,
 		action: "agent-create",

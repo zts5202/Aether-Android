@@ -4,7 +4,8 @@
 > 涵盖：项目是什么、本次会话做了什么、改了哪些文件、哪些验证过哪些没有、还欠什么。
 >
 > **文档撰写时间**：2026-10-04
-> **对应代码状态**：`app-debug.apk` = 83,157,822 bytes，已安装到真机验证
+> **对应代码状态**：`app-debug.apk` = 83,157,822 bytes，已安装到真机验证（**此为 2026-10-03 的状态**）
+> **2026-10-04 增补**：git 仓库已建立；新增 A1/A2 token 瘦身（§2.8）与验证步骤（§4.4）。这些增补已构建并装机（debug APK 83,159,382 字节），**但 Agent Mode 里的实际行为尚未验证**，见 §4.4。
 > **行号说明**：文中行号是撰写时的快照，改动后会漂移。**请以函数名 / 常量名定位为准。**
 
 ---
@@ -17,11 +18,18 @@
 
 **⚠️ 接手前必读的三件事**：
 
-1. **这个目录不是 git 仓库**（没有 `.git`）。没有提交历史、不能 `git diff`、**删除不可回滚**。动手前先自己备份。
+1. **这个目录现在是 git 仓库**（2026-10-04 更新）。最初的 3 个提交：`1db6344` 导入本地工作副本、`d8fe8ab` CI 自动编译 APK 并发布到 GitHub Releases、`369366c` 忽略 `/signing/`。可以 `git diff` / `git revert` 回滚。
+   - 早期会话里"没有 `.git`"的结论已经过期；§3.3 中的 iOS 备份 zip 仍然有效，但不再是唯一的回滚手段。
+   - `signing/` 目录是本地签名材料，已 gitignore，**永远不要提交**。
+   - CI 现为三个 workflow：`pr-check.yml`、`build-nightly-apk.yml`、`release-apk.yml`。
 2. **`targetSdk = 28` 是故意的**，不要"顺手升级"。原因见 §1.3。
 3. **`AGENTS.md` 的约束是硬性的**，改共享层必须同时考虑 Android 的 `app` 与 `iosApp` —— 不过 iOS 已在本次会话中移除，现在只需管 Android。
 
-**当前最重要的待办**：Agent Mode 的 **token 消耗**问题（历史重发导致二次增长）。分析已完成，方案已列，**尚未动手**。见 §6.1。
+**当前最重要的待办**：Agent Mode 的 **token 消耗**问题（历史重发导致二次增长）。
+- **已实施**（2026-10-04，见 §2.8）：A1（画面完全没变不附图）+ A2（`elements` 去掉 `bbox_px`）。**已构建并装机（冷启动无崩溃），但 A1/A2 的实际行为尚未在 Agent Mode 里跑过，也未量化收益。**
+- **已实施**（2026-10-05，见 §2.9）：H1（请求里旧截图/旧 elements 换占位）+ H2（模型可见字段精简）。已装机，真机效果待测。
+- **尚未动手**：B1、C1、C2。是否做取决于 A1+A2 上线后观察到的 token 曲线。见 §6.1。
+- **并行的验证欠账**：`ui_changed` 阈值标定、OCR 飞行模式测试。操作步骤见 §4.4。
 
 ---
 
@@ -146,6 +154,85 @@ proot 容器没有自己的 DHCP，宿主用的是运营商 DNS（实测 `58.240
 - **① 诊断日志**：`action_end` 事件追加坐标字段（注入的显示像素 / 归一化值 / 截图尺寸 / 命中文本 / 元素数 / `ui_changed` / 滚动次数）
 - **② 滚动重试**：`tap_text` 找不到元素时，自动上滑半屏重新 OCR，最多 2 次；**命中后立即点击、不再滚动**（从结构上杜绝重复点击）
 
+### 2.8 Token 瘦身 A1 + A2（2026-10-04，后续会话）
+
+**A1 — 画面完全没变时不附图**（`AgentModeController.kt`）
+
+- `tap` / `swipe` / `tap_text` 在手势前已经截了一帧 16×16 灰度指纹（`beforeFrame`）。`captureAfterDelay` 新增参数 `unchangedFrom`，把**最终那张截图**再算一次指纹，与 `beforeFrame` 做**逐格严格相等**（`contentEquals`）比较。
+- 严格相等则：不写 `screenshot_base64` / `screenshot_mime_type`，改写 `screenshot_omitted: "unchanged"`，`stdout` 改为说明文字。`PiAgentRunner` 本来就是"有 `screenshot_base64` 才附图"，所以**无需改它**。
+- **为什么是严格相等而不是 `ui_changed == false`**：`ui_changed` 用 >1.0 的阈值，会把小控件变化（复选框等）平滑掉；用它判"不附图"会让模型看不到变化。严格相等只在像素级完全一致时才省图，**不会漏掉任何视觉变化**。代价是命中率较低（状态栏时钟、动画页会让它失效），但命中时零风险。
+- **`screenshot` 动作永远附图**；`start` / `launch` / `key` / `text` 不受影响（它们不传 `unchangedFrom`）。
+- 截图文件仍照常写入工作区，`preview_path` 也照常更新；省的只是**送给模型的那一份**。
+- `elements`（OCR 文字）**照常返回**，所以即使省了图，模型仍能拿到当前屏幕文字。
+
+**A2 — `elements` 瘦身**（`AgentModeController.kt` `elementsJson()`）
+
+- 去掉 `bbox_px`，只保留 `bbox_norm`（0..1000）。两者信息等价，`bbox_px` 是纯重复。
+- 同步更新了 `AetherToolExecutor.kt` 里 `agent_display` 的 description（**这是模型可见契约**），并说明 `screenshot_omitted`。
+- 内部 `tap_text` 走的是 `AgentModeTextElement.boundingBox`（OCR 原始像素），**不依赖 JSON 里的 `bbox_px`**，所以点击路径不受影响。
+
+**新增诊断**：`withUiChanged` 现在会往 `events.jsonl` 写一条 `agent_mode / ui_diff_sample`，含 `mean_abs_diff`（原始差值）、`threshold`、`identical`。这是 §4.4 标定阈值的数据源。`action_end` 事件也会带上 `screenshot_omitted`。
+
+**单测**（`AetherToolExecutorTest`）：新增 2 个——清洗后保留 `screenshot_omitted` 且不误标 `screenshot_injected_into_next_model_request`；description 不含 `bbox_px` 但含 `bbox_norm` / `screenshot_omitted`。**控制器本身依赖 Android `Bitmap`，没有 JVM 单测，需要真机验证。**
+
+**预期收益（推算，未实测）**：A2 约省 `elements` 的 30–35%；A1 每次命中省 ≤384 tok 图片。因为历史会被反复重发，累计收益按 N² 放大。**命中率未知**，要看真实会话里 `screenshot_omitted` 出现的比例。
+
+### 2.13 画面指纹改为区域平均（2026-10-05 01:08 装机）——修正 §2.12 的误诊
+
+- **真正根因**：`downscaleToGrayGrid` 用 `Bitmap.createScaledBitmap(588×1280 → 16×16, filter=true)`。大比例缩小时每个输出像素只采样少数源像素，**不是区域平均**，小控件（开关）变化可能一个采样点都碰不到。于是 A1 判"逐像素相同"而省图、`ui_changed=false`。§2.12 当成"服务器慢"是误诊：01:02 那次实跑中，点击后 750ms 的截图里开关**已经**变灰，A1 仍判相同。
+- **修复**：新文件 `AgentModeFrameDiff.kt`（纯函数，JVM 可测）：`areaAveragedGrayGrid()` 逐像素累加到 32×64 网格（每格约 18×20 px）；`ui_changed` 改为"任一格灰度变化 > 4"（`AgentModeUiChangeCellTolerance`），不再用全屏平均差（小控件会被稀释）。A1 仍要求网格完全相等。`ui_diff_sample` 日志改记 `changed_cells` / `max_cell_diff`。
+- **用真机截图验证**（PowerShell + System.Drawing 跑同一算法）：开关开→关 `changed_cells=41, max_cell_diff=69`；静止画面 `0 / 0`。单测 `AgentModeFrameDiffTest` 3 个。
+- **影响**：早先"A1 命中 10/12"的统计（§4.5）是旧采样下得出的，可能含漏检；§2.12 的 1 秒复查保留为保险。
+- 01:02 那次（修复前）同一 B 站任务：9 次请求、27 秒、约 ¥0.030，开关确实关闭了，但模型因 A1 误判多截了 1 次图。
+
+### 2.14 界面汉化 + Agent 操作中间说明跟用户语言（2026-10-05）
+
+- **点击时上方英文**：不是工具标题（`正在点击 Agent 模式屏幕` 早已有中文），而是模型在工具调用之间写的短说明。`PiAgentPrompt.kt` 已要求「用户可见文字跟用户最新消息的语言，包括工具调用之间的短说明」。
+- **插件 UI 改为仅中文**（品牌名 MCP / OAuth / API Key / GitHub 等保留）：`extensions/pi-mcp-adapter/aether.ts`（含「添加 MCP 服务器」）、`extensions/pi-web-access/aether.ts`、`extensions/pi-subagents/src/aether.ts`。三个预装插件的 `package.json` description 也改成中文。
+- **App**：插件列表里残留的 Extension/package 英文词改成「插件/软件包」；通知渠道、文件管理器无障碍文案、Alpine 终端返回键接入字符串资源。
+- **装机注意**：Alpine 预装扩展目录若已存在，`installPreinstalledExtensions` **不会覆盖**。装完 APK 后必须把更新过的 `aether.ts` / `package.json` 推到 `files/runtimes/alpine/rootfs/root/.aether/extensions/`，否则设置页仍是旧英文。
+
+### 2.12 撤回 B1 + "画面没变"延迟复查（2026-10-05 01:01 装机）
+
+- **B1 实测失败，已整体撤回**（参数 `include_image`、`not_requested`、提示词改动全部移除）。同一 B 站任务：请求 12→24 次、截图 10→10 张（一张没省）、用时 40→83 秒、费用 ¥0.040→¥0.096。原因：模型看不到图就主动补 `screenshot`（5 次），每次多一轮请求；而且在"我的"页面瞎猜齿轮图标位置，绕了 13 步。**结论：在 DeepSeek 这类模型上，不要让模型"先盲点后补图"。**
+- **A1 误判修复**：B 站推送开关要等服务器返回才变色，点击后约 750ms 时画面仍逐像素相同，A1 告诉模型"没点中"（截图核实：开关其实已打开）。现在判定"完全没变"后再等 `AgentModeUnchangedRecheckMillis = 1000` 重拍一次；仍相同才省图，变了则附新图并标 `ui_changed = true`、`ui_changed_delayed = true`（诊断日志同步记录）。代价：真正没变的点击多等 1 秒。
+
+### 2.11 B1：手势默认不附图（2026-10-05 00:51 装机，**已于 01:01 撤回，见 §2.12**）
+
+- **动机（实测）**：B 站任务 12 步 $0.0057；带新截图的步骤新增 1100–1450 未命中缓存 token，不带图约 600–700。钱主要花在新截图上。
+- `tap` / `swipe` / `tap_text` 默认 `attachImage = false`：仍然截图（UI 预览、回放、OCR 照常），但不放 `screenshot_base64`，结果带 `screenshot_omitted: "not_requested"`。新增参数 `include_image`（兼容 `includeImage`）按需要图。
+- **保险**：OCR 一个元素都没识别到（纯图标界面或识别失败）时照样附图，模型不会完全看不到画面。
+- `launch` / `key` / `text` / `screenshot` 不变，继续附图。系统提示词去掉"打字前在截图里确认聚焦"，改为用 `text` 自带的截图核对（`focused_window` 只说明窗口有焦点，不能证明输入框被选中，不能拿来当确认依据）。
+- 诊断日志 `action_end` 的 `image_omitted` 现在记原因：`no` / `unchanged` / `not_requested`。
+- **风险待测**：开关状态、纯图标按钮等只能看图判断的场景，模型可能多走一步 `screenshot`，或判断错。用同一任务对比费用、步数与成功率。
+
+### 2.10 回复下方显示本轮 token 与人民币花费（2026-10-05）
+
+- **修了一个统计口径 bug**：以前 `run_turn` 结果的 `usage` 只取**最后一次**模型请求，一个 Agent 任务十几次请求时，"本轮 token"严重偏低。现在 `bridge.ts` `turnUsagePayload()` 把本轮（`timestamp >= 开始时间`）所有 assistant 消息的 usage 与 Pi 算好的 `cost.total`（美元）累加成 `turn_usage`；Kotlin `toPiCompletionResult()` 优先用它，`PiAgentRunner` 对 follow-up 再累加。
+- `LlmTokenUsage` / `ChatUsageStatistics` 新增 `costUsd`（持久化键 `costUsd`，旧消息没有该字段即不显示费用）。导出归档（`shared` 的 `PersistedChatUsage`）**未加**该字段，导出再导入会丢费用。
+- UI（`ConversationMessages.kt` `AssistantMessageActions`）：操作按钮下方一行"本轮消耗 X token · N 次请求 · 约 ¥Y"；统计弹窗新增"约花费（人民币）"。只对 `tokenUsageSource == "api"` 显示；模型无定价（`cost_usd` 为 0）时只显示 token。汇率固定 `ApproximateCnyPerUsd = 7.1`，价格来自 Pi 内置价目表，**不是账单**。
+- 副作用：设置页的累计 token 统计从此按整轮计，数字会比以前大（以前是少算）。
+
+### 2.9 历史观测裁剪 H1 + 字段精简 H2（2026-10-05）
+
+**H1 — 请求里只保留最近的截图和 `elements`**（`pi-bridge/src/agent-display-context.ts`，新文件）
+- 挂在 Pi 扩展的 `context` 事件上（`bridge.ts` 的 `extensionFactories`，仅 Android）。Pi 在每次请求模型前调用它，且事先做了 `structuredClone`，所以**只改发出去的请求，会话文件和 UI 保留原样**。
+- `agent_display` / `browser` 的旧截图换成一行占位文字；`agent_display` 旧结果里的 `elements` / `matches` 删掉，改为 `elements_omitted: N`。
+- 默认保留最近 2 张截图、2 组 `elements`，**按 6 个一批裁剪**：被裁集合只在每多出 6 个时才增长，期间请求前缀逐字节不变，DeepSeek 前缀缓存仍能命中。截图和 `elements` 分开计数，所以 A1 省图（画面没变）的结果不会把"仍是当前画面"的那张图挤掉。
+- 单测：`pi-bridge/tests/agent-display-context.test.mjs`（6 个，Node 直接导入 `.ts`，需 Node ≥22.18）。
+
+**H2 — 给模型看的文字去掉 UI 专用字段**（`AetherToolExecutor.modelVisibleToolOutput()`，`PiAgentRunner.hostToolPayload()` 的 `content.text` 调用）
+- 去掉 `preview_path`、`cursor_x/cursor_y`、`screenshot_mime_type`、`screenshot_injected_into_next_model_request`；结果里有 `image_width` 时再去掉显示器像素 `width/height`。`status` 等不带 `image_width` 的结果保留 `width/height`。
+- **`output_json` 不变**：UI 回放（`ConversationMessages.kt` `buildAgentModeReplayFrames`）读的就是它里面的 `preview_path` / `width` / `cursor_x`。
+- 保留 `image_width/image_height`：系统提示词让模型用它们把像素换算成 0..1000。
+- description 同步：不再提 `cursor_x/cursor_y` 与显示器像素，并说明旧截图/elements 会被占位替换。
+
+**⚠️ H1 实测后改为"上下文超过 6 万 token 才触发"（2026-10-05 00:39 装机）**：B 站任务（19 次请求）实测 DeepSeek 计价为未命中 $0.30/M、命中缓存 $0.006/M（差 50 倍）。H1 在第 12、14 步各触发一次裁剪（截图和 elements 分开计数，各到一次批次边界），两次缓存失效让这两步费用涨到 3–4 倍，**整轮反而多花约 20%**；省下的 4 万 token 全是缓存命中，只值 $0.0002。结论：有便宜缓存的模型上，历史重发几乎不花钱，**钱花在每步新增内容（截图 + elements）和缓存失效上**。现 `minContextTokens = 60_000`，用 Pi 的 `estimateTokens` 对**未裁剪**历史求和（只增不减，触发后不会反复开关）；普通任务不触发。
+
+**诊断日志**：`coordinateDiagnostics` 的 `screenshot_omitted` 改记为布尔 `image_omitted`（键名含 `screenshot` 会被日志脱敏成 `[OMITTED ...]`）。
+
+**验证**：`AetherToolExecutorTest` 9/9 通过；pi-bridge 全量 53 个测试中 8 个失败，与改动前基线（47 个中 8 个失败，均为 Windows 下测试扩展找不到 `typebox` / `babel.cjs`）一致；已装机冷启动无崩溃。**H1/H2 的真机效果（模型是否仍点得准、token 实际降幅）尚未实测。**
+
 ---
 
 ## 3. 变更清单
@@ -174,7 +261,7 @@ proot 容器没有自己的 DHCP，宿主用的是运营商 DNS（实测 `58.240
 | `app/.../ui/AetherViewModel.kt` | `refreshProviderModelCapabilities()`（3 次重试）；`notifySelectedModelRejectsImages()` |
 | `app/.../ui/AetherUiState.kt` | `providerModelCapabilities` 字段 |
 | `app/.../ui/AetherApp.kt` | 组合栏图片入口按能力门控 |
-| `app/.../data/AgentModeController.kt` | **本次改动最多的文件**：`ui_changed`、`elements`、`find_text`、`tap_text`、滚动重试、坐标诊断 |
+| `app/.../data/AgentModeController.kt` | **本次改动最多的文件**：`ui_changed`、`elements`、`find_text`、`tap_text`、滚动重试、坐标诊断；2026-10-04 追加 A1（`unchangedFrom` 省图）、A2（去 `bbox_px`）、`ui_diff_sample` 日志 |
 | `app/.../data/AetherToolExecutor.kt` | `agent_display` schema 扩展（2 个新 action、`query` 描述、`elements` 说明） |
 | `app/.../runtime/AlpineRuntime.kt` | `syncGuestResolver()` / `hostDnsServers()`，替换硬编码 DNS |
 | `app/src/main/AndroidManifest.xml` | 加 `ACCESS_NETWORK_STATE` |
@@ -213,18 +300,95 @@ proot 容器没有自己的 DHCP，宿主用的是运营商 DNS（实测 `58.240
 | ML Kit 模型内嵌 | APK 内含 `assets/mlkit-google-ocr-models/`（25 文件 2.4 MB）+ `libmlkit_google_ocr_pipeline.so`（10.8 MB） |
 | 容器 DNS 自动纠正 | **A/B 实测**通过 |
 | `tap_text("设置")` 真机命中 | **实测通过**（B 站，进入 `BiliPreferencesActivity`） |
+| 坐标诊断日志（2026-10-04 复核） | **实测通过**。真机 `events.jsonl` 里 `agent_mode/action_end` 带 `injected_x/y`、`injected_norm_x/y`、`display_width/height`、`image_width/height`、`ui_changed`、`element_count`。样本中每次截图识别 27–68 个元素（这是 `elements` token 成本的真实量级） |
+| A1/A2 构建与装机（2026-10-04） | `:app:assembleDebug` 成功，APK 83,159,382 字节；`pm install -r` Success；`pm path` / `dumpsys` 核对：`com.baimoqilin.aether.debug`、versionCode 11、versionName 2.1.6、`primaryCpuAbi=arm64-v8a`；冷启动 `Status: ok`，崩溃缓冲区为空 |
 
 ### 4.2 未验证 / 待确认 ⚠️
 
 | 项 | 说明 |
 | :--- | :--- |
 | **图片→视觉的端到端** | 没有用真实 API Key 跑过"发图→模型描述图片"。结论来自 Pi 运行时探针 + 代码走查 |
-| **`ui_changed` 阈值标定** | **阈值 1.0 是推理出来的，不是实测标定的**。未测过"静止画面两次截图的实测差值"。建议验证：静止页面连点空白处，看是否恒为 `false` |
+| **`ui_changed` 阈值标定** | **阈值 1.0 是推理出来的，不是实测标定的**。未测过"静止画面两次截图的实测差值"。现已加 `ui_diff_sample` 日志，按 §4.4 采样即可 |
+| **A1 / A2 真机行为** | 2026-10-04 新增。已装机但未在 Agent Mode 里实跑：A1 的 `screenshot_omitted` 命中率、A2 后模型是否仍能正确点击，均待验证。装机时 `ui_diff_sample` 日志条数为 0（预期，旧版本没有这个事件） |
 | **`elements` 在真机的实测** | 用户跑的是 `tap_text`；`elements` 字段本身的真机样例未回传 |
-| **坐标诊断日志** | 加完后未跑过，未确认日志里出现新字段 |
 | **滚动重试** | 未触发过（首次就命中了），逻辑未实测 |
 | **OCR 绝对零网络** | 模型确实内嵌，但 ML Kit 有遥测链路。静态分析无法断言"零网络请求"。**建议开飞行模式跑一次验证** |
 | **MIUI 底部热区** | 怀疑但未证实（用户用"真实 bbox 而非目测"绕开了） |
+
+### 4.4 验证欠账的操作步骤（2026-10-04 整理）
+
+前提：已按 AGENTS.md 流程安装最新 debug 包（`com.baimoqilin.aether.debug`），Shizuku 授权完成，Agent Mode 已开启。下面命令里的 `$serial` 用 `adb devices -l` 现取。
+
+**① 标定 `ui_changed` 阈值**
+
+1. 在 Agent Mode 里打开一个**完全静止**的页面（设置页、空白备忘录，别用有视频/轮播/时钟的页面）。
+2. 让 Agent 对**空白处**连续 `tap` 约 10 次。
+3. 取日志：
+   ```powershell
+   adb -s $serial shell run-as com.baimoqilin.aether.debug cat files/diagnostics/events.jsonl | Select-String ui_diff_sample
+   ```
+4. 看 `mean_abs_diff`：
+   - 静止页应该全部是 `0` 或接近 `0`（JPEG 重编码同一画面是确定性的，预期**恰好为 0**，`identical=true`）。
+   - 再对一个**会变化的操作**（如打开一个开关）重复，记录差值。
+   - 阈值应落在"静止最大值"与"小控件变化最小值"之间。若小控件变化的差值 < 1.0，说明 1.0 太高，会产生假阴性。
+5. 同时统计 `identical=true` 的比例，这就是 A1 的理论命中率。
+
+**② OCR 飞行模式测试**
+
+1. 开启飞行模式（同时关 Wi-Fi，二者都要关）。
+2. 在 Agent Mode 里执行一次 `find_text` 和一次 `tap_text`。
+3. 预期：仍能返回 `elements` 并点中。若 OCR 返回空或报错，说明 ML Kit 在尝试联网（例如下载模型）。
+4. 补充：ML Kit bundled 版模型在 APK 里，但有遥测链路，**无法用静态分析断言零网络**，只有这个实测能证明。
+
+**③ A1/A2 真机冒烟**
+
+1. 对一个会变化的目标 `tap_text` → 结果应带 `screenshot_base64`（附图）。
+2. 对静止空白处 `tap` → 结果应带 `screenshot_omitted: "unchanged"`，且**没有**图片。
+3. 检查 `elements[*]` 只有 `text` 与 `bbox_norm`，没有 `bbox_px`。
+4. 直接调用 `screenshot` → 必须带图。
+
+**④ 观察 token 曲线**
+
+- 同一个任务（比如"进入 B 站设置页再返回"）在改动前后各跑一遍，比较供应商后台的 input tokens。
+- 会话 JSONL 位置见 §7.4；比较单个会话的大小与含 `image` 的记录条数。
+
+### 4.5 2026-10-04 真机实测结果（提示词 A / B）
+
+数据来源：Pi 会话 JSONL（`agent-sessions/2026-10-04T15-25-09-623Z_session-1791127509471.jsonl`），逐条工具调用与返回。**不要用 `events.jsonl` 做这类统计**——见下方"诊断日志坑"。
+
+**A1 / A2 冒烟：通过 ✅**
+
+- 12 次手势（10 次 `tap` + 1 次 `swipe` + 1 次 `tap_text`）中，**10 次**返回 `screenshot_omitted: "unchanged"` 且不带图；只有第 1、2 次 `tap`（页面真的跳转了，`ui_changed=true`）带图。**图片只在画面变了时才出现**。
+- 这是静止页面的**最好情形**，命中率 10/12 不能外推到真实任务。真实任务里页面基本每步都在变，命中率会低得多。
+- 模型正确理解了 `screenshot_omitted`：每一步都如实报告"有 screenshot_omitted"，没有因为缺图而困惑或重试。
+- `elements` 每项字段为 `[text, bbox_norm]`，无 `bbox_px` ✅。`find_text` 返回的首个元素：`{"text":"字体样式和大小","bbox_norm":[70,77,563,107]}`。
+- `key` 动作仍然带图（它不传 `unchangedFrom`），符合设计。
+
+**`ui_changed` 阈值标定：部分完成 ⚠️**
+
+- 静止页面 10 次手势，`ui_changed` 全为 `false`，**无假阳性**；`ui_diff_sample` 唯一幸存的一条是 `mean_abs_diff=0, identical=true`，印证"同一画面 JPEG 重编码是确定性的，差值恰好为 0"。
+- **小控件变化（复选框等）的差值仍未采到**，阈值 1.0 是否会漏判小变化依然未知。需要专门测一个小控件。
+- 提示词设计缺陷：模型挑的"空白处" (500, 985) 其实可点击，前两次点击跳进了子页面。不是 bug，下次提示词应指定"先 find_text 确认该处无文字且不可点"。
+
+**诊断日志坑（重要）**
+
+- `events.jsonl` 是滚动缓冲：超过 768 KB 就只保留最后 512 KB（`AetherDiagnosticLogger.kt` 的 `DiagnosticLogMaxBytes` / `DiagnosticLogTrimBytes`）。回合结束时 `pi_bridge` 会在 1 秒内刷出 400+ 条帧事件，**把 Agent Mode 的事件挤掉了**：本次 A 轮次 17 次调用，日志里只剩最后 3 条，`ui_diff_sample` 只剩 1 条（12 条里）。
+- 另外 `screenshot_omitted` 的值被 `DiagnosticRedactor` 当成"大内容"脱敏成 `[OMITTED content_chars=9]`（key 里含 `screenshot`）。要在日志里看到它，需要改成布尔值或换个 key 名。
+- **待办**：给 `agent_mode` 单独的日志文件，或降低 `pi_bridge/frame_received` 的记录量；`screenshot_omitted` 以布尔 `screenshot_was_omitted` 写日志。
+
+**提示词 B（飞行模式 OCR）：无效，不能证明离线 ❌**
+
+- 飞行模式 23:28:32 打开，但 **Wi-Fi 一直连着**（`logcat` 里 23:28:46 `wlan0` 仍 active；模型在 2 秒内回复了工具调用；OCR 之后 2 秒的最终模型请求也成功了）。所以整个窗口内网络都是通的。
+- 唯一得到的结论：**一条回复里并行发出 4 个工具调用 + 依次执行，这个手法可行**（`bash sleep 25` 之后 `find_text`×2 + `screenshot` 全部执行，OCR 耗时约 0.17 s/次）。
+- 重做时必须：飞行模式开 **并且** Wi-Fi 关；`sleep` 要足够长（建议 45 s）；最终那次模型请求应当**失败**（`turn_model_failed`），这才是网络断了的铁证。
+
+**OCR 离线测试（重做，adb 控制断网）：通过 ✅**
+
+- **手法**：用户发出提示词后，本机脚本监听 `events.jsonl`，在 `turn_start` 之后第一条 Termux `dispatch start timeout_ms=-1`（即第一个工具开始执行，此时首次模型请求已成功）出现时，执行 `adb shell cmd wifi set-wifi-enabled disabled` 断开 Wi-Fi；回合结束或 90 s 后 `enabled` 恢复。本机移动数据本来就是关的（`mobile_data=0`），所以 Wi-Fi 断开即完全无网。注意：此机 `svc wifi` 不存在，要用 `cmd wifi`。
+- **网络确实断了的证据**：Wi-Fi 15:46:21 断开、15:47:54 恢复；最终那次模型请求在 15:48:19 才成功（断网期间一直卡住，恢复后才返回），回合历时 2 分钟。
+- **OCR 离线结果**：断网窗口内 15:47:02 执行 `launch` 设置页 + 两次 `find_text`，三次均 `ok=true`，各识别出 **18 个元素**。**结论：ML Kit 中文 OCR 在完全无网下可用，不依赖在线模型下载。**
+- **仍不能断言**：ML Kit 有遥测链路，"零网络请求"无法由此证明；本测试只证明"OCR 功能不需要网络"。
+- **第一次失败的教训**：首次尝试 `find_text` 全部 `ok=false`，原因是 `Timed out while capturing display 13`——虚拟屏上没有任何活动（空的虚拟屏不产生画面帧，ImageReader 一直等不到帧），**与断网无关**。凡是要在虚拟屏上截图/OCR 的测试，提示词里都先 `launch` 一个应用保证屏幕有内容。
 
 ### 4.3 那 6 个失败测试（**不是代码问题**）
 
@@ -263,7 +427,7 @@ proot 容器没有自己的 DHCP，宿主用的是运营商 DNS（实测 `58.240
 显示像素 → injectInputEvent
 ```
 
-- `bbox_px` 在**截图系**（588×1280）
+- OCR 原始 bbox 在**截图系**（588×1280），仅在内部使用；**2026-10-04 起 JSON 里不再输出 `bbox_px`**（见 §2.8），模型只看 `bbox_norm`
 - `bbox_norm` 分母是**截图宽高**（不是显示宽高），但因为是等比缩放，结果等价
 - `tap_text` 用 `screenshotPixelToDisplay()` 串联上述两步，**与手动 tap 走完全相同的路径**
 
@@ -337,14 +501,20 @@ proot 容器没有自己的 DHCP，宿主用的是运营商 DNS（实测 `58.240
 
 | 编号 | 方案 | 省 | 影响功能 | 动哪里 |
 | :--- | :--- | :--- | :--- | :--- |
-| **A1** | 画面**完全没变**时不附图（用已有的指纹差，判 `差值 == 0` 而非 `ui_changed == false`） | 384 tok/次 | **无** | `PiAgentRunner.kt` 附图处 |
-| **A2** | `elements` 瘦身（去掉信息重复的 `bbox_px`，只留 `bbox_norm`） | ~35% | **无** | `AgentModeController.kt` `elementsJson()` |
-| **B1** | 图片默认只在 `screenshot` 附图；`tap`/`swipe`/`tap_text` 默认只回文本 + elements + ui_changed。加 additive 参数 `include_image` 按需索取 | ~80% 调用省 384 | 理论上不减少（可显式索取） | `PiAgentRunner.kt` + `AetherToolExecutor.kt` |
+| **A1** ✅已实施 | 画面**完全没变**时不附图（严格逐格相等，而非 `ui_changed == false`） | 384 tok/次 | **无** | 实际落在 `AgentModeController.kt` `captureAfterDelay()`，**不需要改 `PiAgentRunner`**（见 §2.8） |
+| **A2** ✅已实施 | `elements` 瘦身（去掉信息重复的 `bbox_px`，只留 `bbox_norm`） | ~35% | **无** | `AgentModeController.kt` `elementsJson()` |
+| **B1** ❌实测更贵已撤回（§2.12） | 图片默认只在 `screenshot` 附图；`tap`/`swipe`/`tap_text` 默认只回文本 + elements + ui_changed。加 additive 参数 `include_image` 按需索取 | ~80% 调用省 384 | 理论上不减少（可显式索取） | `PiAgentRunner.kt` + `AetherToolExecutor.kt` |
 | **B2** | 引导模型优先用 `find_text`（本就不附图）而非反复 `screenshot` | — | 无 | 仅改 description |
+| **H1** ✅已实施 | 请求里旧截图 / 旧 `elements` 换占位，只留最近 2 个，按 6 个一批裁（保缓存） | 历史重发从 N² 压到接近线性 | 当前画面不受影响；模型无法回看更早的截图 | `pi-bridge/src/agent-display-context.ts`（见 §2.9） |
+| **H2** ✅已实施 | 给模型的文字去掉 UI 专用字段（`output_json` 不变） | ~100 tok/次 | 无 | `AetherToolExecutor.modelVisibleToolOutput()` |
 | **C1** | 接上 `shouldAutoCompactContext`，阈值设低 | 把二次增长截断 | **有**：摘要化丢失细节 | `AetherViewModel.kt` → `PiKernelBridge.compactSession()` |
 | **C2** | 定期重建 Pi 会话（重建时用 Aether 的 messages 作种子，而其中本来就不含 base64 → 累积图片自然清空） | 彻底 | **有**：丢内存态 | `prepareNativeAgentSession` 相关 |
 
-**推荐**：先做 **A1 + A2**（零风险、零功能损失），观察后再考虑 B1。C 类会改变会话语义，风险最高。
+**推荐**：A1 + A2 已做（2026-10-04）。**下一步是先按 §4.4 ④ 观察 token 曲线，再决定 B1**。C 类会改变会话语义，风险最高；除非 A+B 之后曲线仍然陡，否则不做。
+
+**决策门槛（建议）**：
+- 若同类任务 input tokens 下降不明显、且 `screenshot_omitted` 命中率很低（<20%）→ 考虑 B1（默认只有 `screenshot` 附图）。
+- 若单会话仍会涨到 >300K tokens → 才考虑 C1（接上自动压缩，阈值设低）。C2（重建会话）最后考虑。
 
 ### 6.2 Agent Mode 定位准确性限制
 
@@ -426,6 +596,17 @@ $apk = (Resolve-Path "app\build\outputs\apk\debug\app-debug.apk").Path
 
 **注意**：`AGENTS.md` 里写的是核对 `com.baimoqilin.aether`，但 debug 变体实际包名是 **`com.baimoqilin.aether.debug`**（有 `applicationIdSuffix`）。两者是不同 App，会并存。
 
+**⚠️ 重装后 Agent Mode 入口消失（2026-10-04 实测踩坑）**
+
+- **现象**：用 `pm install -r` 覆盖安装后，聊天输入栏的「Agent 模式」选项消失；设置里 Shizuku 授权显示 `Ready`，没有崩溃。
+- **根因**：HyperOS 在重装后会重置该包的「自启动」权限。Aether 探测 Termux 是否就绪（`printf __aether_termux_ready__`）要启动 `com.termux/.app.RunCommandService`，被系统拦截：`logcat` 里是
+  `MIUILOG-AutoStart, Service/Provider/Broadcast Reject ... caller= com.baimoqilin.aether.debug callee= com.termux classname=com.termux.app.RunCommandService`；
+  `events.jsonl` 里是 `termux/trace "dispatch rejected"`。Termux 探测失败 → `agentModeReady`（见 `AetherApp.kt` 的 `agentModeReady`，同时要求 Termux 就绪）为 false → 入口隐藏。
+- **判断方法**：重装前同一探测是 `dispatch result ... exit_code=0`，重装后全部 `dispatch rejected`。
+- **修复（用户在手机上操作）**：系统「设置 → 应用设置 → 应用管理 → Aether（debug）→ 自启动」打开；再把电池策略设为「无限制」。然后回到 App，Agent 模式入口会恢复。
+- **不是代码问题**。每次重装后都要复查，装机流程里应加一步：重装后立刻读 logcat 里的 `MIUILOG-AutoStart` 与 `events.jsonl` 里的 `dispatch rejected`。
+- 同一轮日志里还有一次 `402 Insufficient Balance`：这是 DeepSeek 账户余额不足（请求已携带有效 Key 到达供应商），与应用无关。
+
 ### 7.4 看诊断日志
 
 ```powershell
@@ -464,13 +645,19 @@ $pkg = "com.baimoqilin.aether.debug"
 
 按优先级：
 
-1. **先补验证**（成本低、价值高）：
-   - 标定 `ui_changed` 阈值（静止页面连点空白，应恒为 `false`）
-   - 飞行模式跑一次 `tap_text`，确认 OCR 完全离线
+1. ~~做 A1 + A2 降 token~~ ✅ 已实施（§2.8），**待装机**。
+2. **装机并按 §4.4 补验证**（成本低、价值高）：
+   - 标定 `ui_changed` 阈值（读 `ui_diff_sample` 日志）
+   - 飞行模式跑一次 `find_text` / `tap_text`，确认 OCR 完全离线
+   - A1/A2 冒烟：`screenshot_omitted` 命中、`elements` 无 `bbox_px`
    - 回传一条真实的 `elements` 样例 + 一条 `action_end` 诊断日志
-2. **做 A1 + A2 降 token**（零风险，不影响功能）
-3. **观察模型行为**后再决定是否上 B1
+3. **观察 token 曲线**（§4.4 ④），按 §6.1 的"决策门槛"决定是否上 B1 / C1 / C2。H1/H2（§2.9）已装机，先用同一任务对比成功率、步数、input tokens，确认点击精度没退化
 4. **元素定位的下一步**：视图树 / 无障碍层，用于覆盖**纯图标控件**（OCR 永远拿不到）
+5. **长期重构（独立提交，不与功能改动混合）**：
+   - 拆大文件：`SettingsScreen.kt`（~6.8k 行）、`AetherViewModel.kt`（~6.1k）、`bridge.ts`（~3.4k）、`SessionExecutionManager.kt`（~2.9k）、`AetherApp.kt`（~2.1k）、`AgentModeController.kt`（~1.8k）
+   - 收敛 `shared/commonMain/ui` 与 `app/ui` 的双份 UI；清理已无目标的 `PlatformCapabilities.Ios`
+   - **约束**：每一项重构单独一个（或一组）提交，**提交内只做移动/拆分，不改行为**；功能提交与重构提交永不混在一起，这样 `git revert` 和 `git bisect` 才有意义
+   - 拆分前先确认 `./gradlew :app:testDebugUnitTest` 的基线（Windows 非管理员下 6 个 `AlpineDocumentStoreTest` 失败是既有项）
 
 ---
 

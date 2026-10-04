@@ -27,7 +27,9 @@ internal fun buildPiAgentInstructions(
             "User-uploaded files are placed under uploads/; use read on the provided path when image or file contents are needed. " +
             "Aether-owned configuration, Skill, runtime, Extension, Agent Mode, scheduled-task, and developer operations are exposed only through available aether_* tools. " +
             "Never modify LLM provider credentials or model configuration through self-management tools. " +
-            "Only claim device actions or command results that were actually observed."
+            "Only claim device actions or command results that were actually observed. " +
+            "Write all user-visible text in the language of the user's latest message, including the short notes " +
+            "between tool calls (they are shown live to the user), even though these instructions are in English."
     )
     if (agentModeEnabled) {
         append(

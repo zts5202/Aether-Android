@@ -3309,33 +3309,44 @@ private fun AssistantMessageActions(
         },
         label = "statistics_popup_scale",
     )
+    val turnSummary = usageStatistics?.let { turnUsageSummary(it) }
     Box {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistantMessageAction(
-                icon = LucideIcons.Copy,
-                contentDescription = stringResource(R.string.common_copy_reply),
-                onClick = onCopy,
-            )
-            AssistantMessageAction(
-                icon = LucideIcons.RotateCcw,
-                contentDescription = stringResource(R.string.common_redo_reply),
-                enabled = actionsEnabled,
-                onClick = onRedo,
-            )
-            AssistantMessageAction(
-                icon = LucideIcons.Trash2,
-                contentDescription = stringResource(R.string.common_delete_reply),
-                enabled = actionsEnabled,
-                onClick = onDelete,
-            )
-            AssistantMessageAction(
-                icon = LucideIcons.ChartNoAxesColumn,
-                contentDescription = stringResource(R.string.statistics_title),
-                onClick = {
-                    keepStatisticsPopup = true
-                    showStatistics = true
-                },
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistantMessageAction(
+                    icon = LucideIcons.Copy,
+                    contentDescription = stringResource(R.string.common_copy_reply),
+                    onClick = onCopy,
+                )
+                AssistantMessageAction(
+                    icon = LucideIcons.RotateCcw,
+                    contentDescription = stringResource(R.string.common_redo_reply),
+                    enabled = actionsEnabled,
+                    onClick = onRedo,
+                )
+                AssistantMessageAction(
+                    icon = LucideIcons.Trash2,
+                    contentDescription = stringResource(R.string.common_delete_reply),
+                    enabled = actionsEnabled,
+                    onClick = onDelete,
+                )
+                AssistantMessageAction(
+                    icon = LucideIcons.ChartNoAxesColumn,
+                    contentDescription = stringResource(R.string.statistics_title),
+                    onClick = {
+                        keepStatisticsPopup = true
+                        showStatistics = true
+                    },
+                )
+            }
+            if (turnSummary != null) {
+                Text(
+                    text = turnSummary,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AetherOnSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
         }
         if (keepStatisticsPopup || showStatistics) {
             Popup(
@@ -3406,6 +3417,11 @@ private fun MessageStatisticsPopup(
             MessageStatisticRow(
                 label = stringResource(R.string.statistics_turn_tokens),
                 value = usageStatistics?.totalTokens?.let(::formatTokenCount)
+                    ?: stringResource(R.string.statistics_unavailable),
+            )
+            MessageStatisticRow(
+                label = stringResource(R.string.statistics_estimated_cost),
+                value = usageStatistics?.costUsd?.let { "¥" + formatCnyCost(it) }
                     ?: stringResource(R.string.statistics_unavailable),
             )
             MessageStatisticRow(
@@ -3527,6 +3543,27 @@ private fun formatTokenCount(tokens: Long): String = when {
     tokens >= 1_000_000L -> String.format(Locale.US, "%.1fM", tokens / 1_000_000.0)
     tokens >= 1_000L -> String.format(Locale.US, "%.1fK", tokens / 1_000.0)
     else -> tokens.toString()
+}
+
+/** Turn totals shown under a reply; only for provider-reported usage, never local estimates. */
+@Composable
+private fun turnUsageSummary(usage: ChatUsageStatistics): String? {
+    if (usage.tokenUsageSource != "api") return null
+    val tokens = usage.totalTokens?.takeIf { it > 0L } ?: return null
+    val cost = usage.costUsd?.let(::formatCnyCost)
+    return if (cost == null) {
+        stringResource(R.string.statistics_turn_summary, formatTokenCount(tokens), usage.requestCount)
+    } else {
+        stringResource(R.string.statistics_turn_summary_with_cost, formatTokenCount(tokens), usage.requestCount, cost)
+    }
+}
+
+// Pi prices usage in USD; a fixed rate is accurate enough for an approximate figure.
+private const val ApproximateCnyPerUsd = 7.1
+
+internal fun formatCnyCost(costUsd: Double): String {
+    val cny = costUsd * ApproximateCnyPerUsd
+    return String.format(Locale.US, if (cny < 0.1) "%.4f" else "%.2f", cny)
 }
 
 private fun formatTokenRate(tokensPerSecond: Double): String =

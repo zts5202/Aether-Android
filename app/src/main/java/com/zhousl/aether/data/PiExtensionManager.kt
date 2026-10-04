@@ -726,7 +726,11 @@ class PiExtensionManager(
         return InstalledPiExtension(
             id = "import:$scope:$guestRoot/${file.name}",
             name = manifest?.optString("name").orEmpty().ifBlank { file.nameWithoutExtension },
-            source = if (scope == "pi") "Pi user directory" else "Imported",
+            source = if (scope == "pi") {
+                appContext.getString(com.zhousl.aether.R.string.settings_extension_source_pi_user)
+            } else {
+                appContext.getString(com.zhousl.aether.R.string.settings_extension_source_imported)
+            },
             version = manifest?.optString("version").orEmpty(),
             description = manifest?.optString("description").orEmpty(),
             installedPath = file.canonicalPath,

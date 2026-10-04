@@ -22,7 +22,6 @@ import com.zhousl.aether.agentmode.IAetherAgentModeService
 import com.zhousl.aether.termux.TermuxBashTool
 import java.io.File
 import java.util.concurrent.TimeUnit
-import kotlin.math.abs
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,10 +49,14 @@ private const val AgentModeCaptureMimeType = "image/jpeg"
 private const val AgentModeCaptureMaxEdge = 1280
 private const val AgentModeCoordinateSpace = "normalized_0_1000"
 private const val AgentModeCaptureJpegQuality = 85
-// ui_changed fingerprinting: compare a coarse grayscale grid of the display before/after a gesture.
-private const val AgentModeUiChangeGridSize = 16
+// ui_changed fingerprinting: compare an area-averaged grayscale grid of the display before/after a
+// gesture. Cells are ~18x20 px on a 588x1280 capture, so a toggle switch spans several of them.
+private const val AgentModeUiChangeGridColumns = 32
+private const val AgentModeUiChangeGridRows = 64
 private const val AgentModeUiChangeSettleMillis = 400L
-private const val AgentModeUiChangeThreshold = 1.0
+// A local change counts once any single cell moves by more than this many gray levels.
+private const val AgentModeUiChangeCellTolerance = 4
+private const val AgentModeUnchangedRecheckMillis = 1_000L
 // tap_text search: when the query is not on screen, scroll the content up and look again.
 private const val AgentModeTextSearchMaxScrolls = 2
 private const val AgentModeTextSearchScrollDurationMillis = 300
@@ -287,8 +290,9 @@ class AgentModeController(
                             termuxWorkspaceDirectory,
                             delayMillis = 350,
                             extras = focusExtras(settings, displayId)
-                                .withUiChanged(beforeFrame, afterFrame),
+                                .withUiChanged(beforeFrame, afterFrame, action = "tap"),
                             includeElements = true,
+                            unchangedFrom = beforeFrame,
                         )
                     }
                 }
@@ -317,8 +321,9 @@ class AgentModeController(
                             workspaceDirectory,
                             termuxWorkspaceDirectory,
                             delayMillis = durationMs.toLong() + 250,
-                            extras = JSONObject().withUiChanged(beforeFrame, afterFrame),
+                            extras = JSONObject().withUiChanged(beforeFrame, afterFrame, action = "swipe"),
                             includeElements = true,
+                            unchangedFrom = beforeFrame,
                         )
                     }
                     else -> invalidArguments("x1, y1, x2, and y2 are required.")
@@ -786,15 +791,26 @@ class AgentModeController(
         delayMillis: Long,
         extras: JSONObject? = null,
         includeElements: Boolean = false,
+        unchangedFrom: IntArray? = null,
     ): String {
         if (delayMillis > 0) delay(delayMillis)
         val captureId = "capture-${System.currentTimeMillis()}"
         val previewFile = File(cacheDirectory, "$captureId.$AgentModeCaptureExtension")
-        captureImageFile(settings, previewFile)
-        if (!previewFile.isFile || previewFile.length() <= 0L) {
-            error("Agent Mode screenshot capture produced an empty file.")
+        var bytes = captureBytes(settings, previewFile)
+        // Token saver: when the gesture left the screen pixel-for-pixel identical to the frame taken
+        // before it, the image adds nothing the model has not already seen, so it is not attached.
+        // The comparison is exact (not thresholded) so a small change is never mistaken for "same".
+        var screenUnchanged = unchangedFrom != null &&
+            fingerprintJpegBytes(bytes)?.let { isIdenticalFrame(unchangedFrom, it) } == true
+        // Some apps only redraw after a server round trip (e.g. Bilibili's notification toggles),
+        // so an "unchanged" verdict is confirmed once more before the model is told the tap missed.
+        var changedAfterRecheck = false
+        if (screenUnchanged && unchangedFrom != null) {
+            delay(AgentModeUnchangedRecheckMillis)
+            bytes = captureBytes(settings, previewFile)
+            screenUnchanged = fingerprintJpegBytes(bytes)?.let { isIdenticalFrame(unchangedFrom, it) } == true
+            changedAfterRecheck = !screenUnchanged
         }
-        val bytes = previewFile.readBytes()
         val latestPreviewFile = File(cacheDirectory, "latest.$AgentModeCaptureExtension")
         previewFile.copyTo(latestPreviewFile, overwrite = true)
         val previewPath = previewFile.absolutePath
@@ -826,8 +842,8 @@ class AgentModeController(
             put("image_width", imageWidth)
             put("image_height", imageHeight)
             put("coordinate_space", AgentModeCoordinateSpace)
-            // Element boxes are expressed in this screenshot's pixel space, so bbox_px lines up with
-            // the image_width/image_height reported here.
+            // Element boxes (bbox_norm) are normalized against this screenshot's size, which is the
+            // image_width/image_height reported here.
             if (includeElements) {
                 recognizeElementsJson(bytes, imageWidth, imageHeight)?.let { put("elements", it) }
             }
@@ -843,9 +859,23 @@ class AgentModeController(
                 put("cursor_norm_y", normalizeAgentModePixel(it, state.height))
             }
             extras?.keys()?.forEach { key -> put(key, extras.get(key)) }
-            put("screenshot_mime_type", AgentModeCaptureMimeType)
-            put("screenshot_base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
-            put("stdout", "Captured Agent Mode screenshot: $workspacePath")
+            if (changedAfterRecheck) {
+                put("ui_changed", true)
+                put("ui_changed_delayed", true)
+            }
+            if (screenUnchanged) {
+                put("screenshot_omitted", "unchanged")
+                put(
+                    "stdout",
+                    "The screen is pixel-identical to before the gesture, even after waiting " +
+                        "${AgentModeUnchangedRecheckMillis}ms, so no screenshot is attached. " +
+                        "Call action=screenshot if you need the image again.",
+                )
+            } else {
+                put("screenshot_mime_type", AgentModeCaptureMimeType)
+                put("screenshot_base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                put("stdout", "Captured Agent Mode screenshot: $workspacePath")
+            }
         }.toString()
     }
 
@@ -861,6 +891,14 @@ class AgentModeController(
             cursorAnimationDurationMillis = animationDurationMillis.coerceIn(80, 1_200),
             lastUpdatedMillis = System.currentTimeMillis(),
         )
+    }
+
+    private suspend fun captureBytes(settings: AppSettings, outputFile: File): ByteArray {
+        captureImageFile(settings, outputFile)
+        if (!outputFile.isFile || outputFile.length() <= 0L) {
+            error("Agent Mode screenshot capture produced an empty file.")
+        }
+        return outputFile.readBytes()
     }
 
     private suspend fun captureImageFile(
@@ -914,54 +952,57 @@ class AgentModeController(
         }
     }.getOrNull()
 
-    private fun downscaleToGrayGrid(bitmap: Bitmap): IntArray {
-        val scaled = Bitmap.createScaledBitmap(
-            bitmap,
-            AgentModeUiChangeGridSize,
-            AgentModeUiChangeGridSize,
-            true,
-        )
+    /** Fingerprints an already-captured JPEG; null when it cannot be decoded. */
+    private fun fingerprintJpegBytes(bytes: ByteArray): IntArray? = runCatching {
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching null
         try {
-            val cellCount = AgentModeUiChangeGridSize * AgentModeUiChangeGridSize
-            val pixels = IntArray(cellCount)
-            scaled.getPixels(
-                pixels,
-                0,
-                AgentModeUiChangeGridSize,
-                0,
-                0,
-                AgentModeUiChangeGridSize,
-                AgentModeUiChangeGridSize,
-            )
-            return IntArray(cellCount) { index ->
-                val pixel = pixels[index]
-                val red = (pixel shr 16) and 0xFF
-                val green = (pixel shr 8) and 0xFF
-                val blue = pixel and 0xFF
-                (red * 299 + green * 587 + blue * 114) / 1000
-            }
+            downscaleToGrayGrid(bitmap)
         } finally {
-            if (scaled !== bitmap) scaled.recycle()
+            bitmap.recycle()
         }
-    }
+    }.getOrNull()
 
-    /** Mean absolute difference per grid cell, on the 0..255 grayscale scale. */
-    private fun meanAbsoluteDifference(before: IntArray, after: IntArray): Double {
-        if (before.isEmpty() || before.size != after.size) return 0.0
-        var total = 0
-        for (index in before.indices) {
-            total += abs(before[index] - after[index])
-        }
-        return total.toDouble() / before.size
+    private fun isIdenticalFrame(before: IntArray, after: IntArray): Boolean =
+        before.isNotEmpty() && before.contentEquals(after)
+
+    private fun downscaleToGrayGrid(bitmap: Bitmap): IntArray {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        return areaAveragedGrayGrid(
+            pixels,
+            bitmap.width,
+            bitmap.height,
+            AgentModeUiChangeGridColumns,
+            AgentModeUiChangeGridRows,
+        )
     }
 
     /**
      * Adds `ui_changed` when both frames were captured. The field is omitted when the comparison
      * could not run, so a caller never reads a fabricated "unchanged".
      */
-    private fun JSONObject.withUiChanged(before: IntArray?, after: IntArray?): JSONObject = apply {
+    private fun JSONObject.withUiChanged(
+        before: IntArray?,
+        after: IntArray?,
+        action: String,
+    ): JSONObject = apply {
         if (before != null && after != null && before.size == after.size) {
-            put("ui_changed", meanAbsoluteDifference(before, after) > AgentModeUiChangeThreshold)
+            val changedCells = changedGridCellCount(before, after, AgentModeUiChangeCellTolerance)
+            put("ui_changed", changedCells > 0)
+            // Raw scores go to the diagnostics log only (not the model-visible result), so the
+            // tolerance can be calibrated against real devices: run a no-op tap on a static page
+            // and read `ui_diff_sample` from events.jsonl.
+            diagnosticLogger.event(
+                category = "agent_mode",
+                event = "ui_diff_sample",
+                details = mapOf(
+                    "action" to action,
+                    "changed_cells" to changedCells,
+                    "max_cell_diff" to maxGridCellDifference(before, after),
+                    "cell_tolerance" to AgentModeUiChangeCellTolerance,
+                    "identical" to isIdenticalFrame(before, after),
+                ),
+            )
         }
     }
 
@@ -984,9 +1025,10 @@ class AgentModeController(
     }.getOrNull()
 
     /**
-     * Serializes elements in both coordinate spaces:
-     * - `bbox_px` is in screenshot pixels (0..image_width / 0..image_height).
-     * - `bbox_norm` is the same box in the 0..1000 space that tap/swipe accept directly.
+     * Serializes elements with a single box, `bbox_norm` = [left, top, right, bottom] in the 0..1000
+     * space that tap/swipe accept directly. A pixel box (`bbox_px`) used to be emitted too, but it
+     * carried the same information at roughly a third of the element's token cost; a pixel value
+     * is `bbox_norm / 1000 * image_width|image_height` if it is ever needed.
      */
     private fun elementsJson(
         elements: List<AgentModeTextElement>,
@@ -998,15 +1040,6 @@ class AgentModeController(
             put(
                 JSONObject().apply {
                     put("text", element.text)
-                    put(
-                        "bbox_px",
-                        JSONArray().apply {
-                            put(box.left)
-                            put(box.top)
-                            put(box.right)
-                            put(box.bottom)
-                        },
-                    )
                     put(
                         "bbox_norm",
                         JSONArray().apply {
@@ -1201,7 +1234,7 @@ class AgentModeController(
             termuxWorkspaceDirectory,
             delayMillis = 350,
             extras = focusExtras(settings, displayId)
-                .withUiChanged(beforeFrame, afterFrame)
+                .withUiChanged(beforeFrame, afterFrame, action = "tap_text")
                 .put("action", "tap_text")
                 .put("query", query)
                 .put("matched_text", resolvedMatch.text)
@@ -1216,6 +1249,7 @@ class AgentModeController(
                     },
                 ),
             includeElements = true,
+            unchangedFrom = beforeFrame,
         )
     }
 
@@ -1243,6 +1277,9 @@ class AgentModeController(
             result.optIntOrNull("match_count")?.let { put("match_count", it) }
             result.optIntOrNull("scroll_attempts")?.let { put("scroll_attempts", it) }
             if (result.has("ui_changed")) put("ui_changed", result.optBoolean("ui_changed"))
+            // Keys containing "screenshot" are summarized by the diagnostic logger, so log under another name.
+            put("image_omitted", result.optString("screenshot_omitted").ifBlank { "no" })
+            if (result.optBoolean("ui_changed_delayed")) put("ui_changed_delayed", true)
             result.optJSONArray("elements")?.let { put("element_count", it.length()) }
         }
     }

@@ -47,6 +47,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import com.zhousl.aether.R
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -105,7 +107,7 @@ fun AlpineTerminalScreen(
         val result = createLaunchSpec()
         result.fold(
             onSuccess = { launchSpec = it },
-            onFailure = { errorMessage = it.message ?: "Unable to start Alpine terminal." },
+            onFailure = { errorMessage = it.message ?: context.getString(R.string.alpine_terminal_start_failed) },
         )
     }
 
@@ -236,7 +238,7 @@ private fun TerminalTopBar(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = "Back",
+                contentDescription = stringResource(R.string.common_back),
                 tint = AetherOnSurface,
                 modifier = Modifier.padding(2.dp),
             )

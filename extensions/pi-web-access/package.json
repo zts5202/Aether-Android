@@ -1,7 +1,7 @@
 {
   "name": "pi-web-access",
   "version": "0.18.0-aether.2",
-  "description": "Web search, URL fetching, GitHub repo cloning, PDF extraction, YouTube video understanding, and local video analysis for Pi coding agent. Supports OpenAI, Brave, Parallel, TinyFish, Search1API, Searchinfinity, Querit, Tavily, SERPdive, Kagi, Ollama, AnySearch, Bright Data SERP, SerpBase, SearXNG, Firecrawl extraction, Exa, Perplexity, and Gemini.",
+  "description": "网页搜索、抓取网页、克隆 GitHub 仓库、提取 PDF、理解 YouTube 以及本地视频分析",
   "type": "module",
   "scripts": {
     "test": "node --test",

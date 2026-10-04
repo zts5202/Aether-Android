@@ -18,6 +18,7 @@ class PiAgentPromptTest {
 
         assertTrue(instructions.contains("current local runtime is alpine"))
         assertTrue(instructions.contains("use read on the provided path"))
+        assertTrue(instructions.contains("language of the user's latest message"))
         assertFalse(instructions.contains("analyze_image"))
         assertFalse(instructions.contains("fetch_web_url"))
         assertFalse(instructions.contains("mcp_"))

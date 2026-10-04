@@ -9,6 +9,8 @@ data class LlmTokenUsage(
     val reasoningTokens: Long? = null,
     val cachedInputTokens: Long? = null,
     val requestCount: Int = 1,
+    /** Provider-priced cost in USD as computed by Pi; null when the model has no pricing. */
+    val costUsd: Double? = null,
 ) {
     operator fun plus(other: LlmTokenUsage): LlmTokenUsage = LlmTokenUsage(
         inputTokens = sumNullable(inputTokens, other.inputTokens),
@@ -17,6 +19,11 @@ data class LlmTokenUsage(
         reasoningTokens = sumNullable(reasoningTokens, other.reasoningTokens),
         cachedInputTokens = sumNullable(cachedInputTokens, other.cachedInputTokens),
         requestCount = requestCount + other.requestCount,
+        costUsd = when {
+            costUsd == null -> other.costUsd
+            other.costUsd == null -> costUsd
+            else -> costUsd + other.costUsd
+        },
     )
 
     fun withMissingTotalResolved(): LlmTokenUsage = if (totalTokens != null) {

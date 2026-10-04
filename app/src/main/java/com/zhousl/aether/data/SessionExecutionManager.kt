@@ -1469,6 +1469,7 @@ class SessionExecutionManager(
             reasoningTokens = tokenUsage?.reasoningTokens,
             cachedInputTokens = tokenUsage?.cachedInputTokens,
             requestCount = tokenUsage?.requestCount ?: 1,
+            costUsd = tokenUsage?.costUsd,
             tokenUsageSource = tokenUsageSource,
             startedAtMillis = turnStartedAtMillis ?: 0L,
             firstTokenAtMillis = firstTokenAtMillis,
@@ -2269,7 +2270,7 @@ class SessionExecutionManager(
             val updatedChunks = if (existingChunk == null) {
                 block.trace.chunks + ReasoningSummaryChunk(
                     id = chunkId,
-                    title = "Reasoning",
+                    title = application.getString(com.zhousl.aether.R.string.reasoning_chunk_title),
                     detail = updatedDetail,
                     isPending = false,
                     createdAtMillis = now,
@@ -2496,10 +2497,10 @@ class SessionExecutionManager(
             .joinToString(" ")
             .replace(Regex("\\s+"), " ")
         return ReasoningSummary(
-            title = "Thinking through the next step",
+            title = application.getString(com.zhousl.aether.R.string.reasoning_fallback_title),
             detail = compact
                 .take(ReasoningSummaryDetailMaxChars)
-                .ifBlank { "Preparing the next action." },
+                .ifBlank { application.getString(com.zhousl.aether.R.string.reasoning_fallback_detail) },
         )
     }
 

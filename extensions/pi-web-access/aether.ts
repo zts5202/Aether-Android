@@ -91,8 +91,8 @@ type ConfigBinding = {
 };
 
 const providerOptions = [
-	["auto", "Auto"],
-	["all", "All eligible providers"],
+	["auto", "自动"],
+	["all", "所有可用服务商"],
 	["openai", "OpenAI"],
 	["brave", "Brave"],
 	["parallel", "Parallel"],
@@ -125,16 +125,16 @@ function commaSeparated(value: unknown): string {
 function parseProviderRoute(value: SettingValue): string[] {
 	const providers = String(value).split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
 	const invalid = providers.find((provider) => !routedProviders.includes(provider));
-	if (invalid) throw new Error(`Unknown search provider in route: ${invalid}`);
-	if (new Set(providers).size !== providers.length) throw new Error("Sequential provider route must not contain duplicates.");
+	if (invalid) throw new Error(`回退路线中有未知的搜索服务商：${invalid}`);
+	if (new Set(providers).size !== providers.length) throw new Error("顺序回退路线不能包含重复的服务商。");
 	return providers;
 }
 
 const webSearchEnabledBinding: ConfigBinding = {
 	setting: {
 		id: "webSearchEnabled",
-		label: "Web search tools",
-		description: "Register search and source-check tools after the next extension reload.",
+		label: "网页搜索工具",
+		description: "下次重新加载插件后注册搜索和来源核对工具。",
 		type: "toggle",
 	},
 	path: ["webSearch", "enabled"],
@@ -144,8 +144,8 @@ const webSearchEnabledBinding: ConfigBinding = {
 const providerBinding: ConfigBinding = {
 	setting: {
 		id: "provider",
-		label: "Default search provider",
-		description: "Used whenever a tool call leaves provider on Auto.",
+		label: "默认搜索服务商",
+		description: "工具调用将服务商留为「自动」时使用。",
 		type: "select",
 		options: providerOptions,
 	},
@@ -158,8 +158,8 @@ const advancedCoreBindings: ConfigBinding[] = [
 	{
 		setting: {
 			id: "searchRoutingProviders",
-			label: "Sequential fallback route",
-			description: "Comma-separated providers in priority order. Saving a route clears the single-provider override and uses transient, quota, and network fallbacks by default.",
+			label: "顺序回退路线",
+			description: "按优先级用逗号分隔服务商。保存路线后会清除单一服务商覆盖，并默认在瞬时错误、额度不足和网络故障时回退。",
 			type: "text",
 			placeholder: "openai, brave, exa",
 		},
@@ -186,13 +186,13 @@ const advancedCoreBindings: ConfigBinding[] = [
 	{
 		setting: {
 			id: "workflow",
-			label: "Result workflow",
-			description: "Review a draft, return an automatic summary, or return raw results.",
+			label: "结果工作流",
+			description: "审阅草稿、返回自动摘要，或返回原始结果。",
 			type: "select",
 			options: [
-				{ value: "summary-review", label: "Summary review" },
-				{ value: "auto-summary", label: "Automatic summary" },
-				{ value: "none", label: "Raw results" },
+				{ value: "summary-review", label: "摘要审阅" },
+				{ value: "auto-summary", label: "自动摘要" },
+				{ value: "none", label: "原始结果" },
 			],
 		},
 		path: ["workflow"],
@@ -201,8 +201,8 @@ const advancedCoreBindings: ConfigBinding[] = [
 	{
 		setting: {
 			id: "curatorTimeoutSeconds",
-			label: "Curator idle timeout",
-			description: "Seconds before an idle review is submitted automatically.",
+			label: "审阅空闲超时",
+			description: "审阅界面空闲多少秒后自动提交。",
 			type: "number",
 			min: 10,
 			max: 600,
@@ -213,8 +213,8 @@ const advancedCoreBindings: ConfigBinding[] = [
 	{
 		setting: {
 			id: "autoOpenBrowser",
-			label: "Open curator automatically",
-			description: "Open the review UI when a local search starts.",
+			label: "自动打开审阅界面",
+			description: "本地搜索开始时打开审阅界面。",
 			type: "toggle",
 		},
 		path: ["autoOpenBrowser"],
@@ -254,9 +254,9 @@ function credentialBinding(id: string, options?: { label?: string; description?:
 			id: credentialId,
 			label: options?.label ?? "API Key",
 			description: options?.description
-				?? `${providerLabel} credential. Accepts a literal key, $${environmentVariable}, or a !command source. Shown as the currently configured value; clearing it removes the credential.`,
+				?? `${providerLabel} 凭据。可填写密钥本身、$${environmentVariable}，或 !command 来源。此处显示当前已配置的值；清空即移除凭据。`,
 			type: "password",
-			placeholder: `Literal key, $${environmentVariable}, or !command`,
+			placeholder: `密钥、$${environmentVariable} 或 !command`,
 		},
 		path: [credentialId],
 		defaultValue: "",
@@ -265,15 +265,15 @@ function credentialBinding(id: string, options?: { label?: string; description?:
 }
 
 const cloudflareApiKeyBinding: ConfigBinding = credentialBinding("cloudflareApiKey", {
-	label: "Cloudflare AI Gateway key",
-	description: "Credential for the Cloudflare AI Gateway when a Gemini gateway base URL is configured. Accepts a literal key, $CLOUDFLARE_API_KEY, or a !command source.",
+	label: "Cloudflare AI Gateway 密钥",
+	description: "配置了 Gemini 网关 Base URL 时使用的 Cloudflare AI Gateway 凭据。可填写密钥本身、$CLOUDFLARE_API_KEY，或 !command 来源。",
 });
 
 const summaryModelBinding: ConfigBinding = {
 	setting: {
 		id: "summaryModel",
-		label: "Summary model",
-		description: "Optional provider/model id. Empty uses the best enabled model.",
+		label: "摘要模型",
+		description: "可选的服务商/模型 ID。留空则使用当前已启用的最佳模型。",
 		type: "text",
 		placeholder: "provider/model-id",
 	},
@@ -284,8 +284,8 @@ const summaryModelBinding: ConfigBinding = {
 const geminiSearchModelBinding: ConfigBinding = {
 	setting: {
 		id: "searchModel",
-		label: "Gemini search model",
-		description: "Optional Gemini grounded-search model override.",
+		label: "Gemini 搜索模型",
+		description: "可选的 Gemini 接地搜索模型覆盖。",
 		type: "text",
 		placeholder: "gemini-3.6-flash",
 	},
@@ -297,7 +297,7 @@ function baseUrlBinding(id: string, providerLabel: string, description: string, 
 	return {
 		setting: {
 			id,
-			label: "Base URL",
+			label: "基础 URL",
 			description,
 			type: "text",
 			placeholder,
@@ -310,148 +310,148 @@ function baseUrlBinding(id: string, providerLabel: string, description: string, 
 const openaiBaseUrlBinding = baseUrlBinding(
 	"openaiResponsesUrl",
 	"OpenAI",
-	"Optional Responses-compatible endpoint override. Empty uses the default endpoint.",
+	"可选的 Responses 兼容端点覆盖。留空则使用默认端点。",
 	"https://api.openai.com/v1/responses",
 );
 
 const braveBaseUrlBinding = baseUrlBinding(
 	"braveBaseUrl",
 	"Brave",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.search.brave.com/res/v1/web/search",
 );
 
 const parallelBaseUrlBinding = baseUrlBinding(
 	"parallelBaseUrl",
 	"Parallel",
-	"Optional gateway override; search and extract requests are routed there. Empty uses the default endpoint.",
+	"可选的网关覆盖；搜索和提取请求会发到这里。留空则使用默认端点。",
 	"https://api.parallel.ai",
 );
 
 const tinyfishBaseUrlBinding = baseUrlBinding(
 	"tinyfishBaseUrl",
 	"TinyFish",
-	"Optional gateway override; search and fetch requests are routed there. Empty uses the default endpoints.",
+	"可选的网关覆盖；搜索和抓取请求会发到这里。留空则使用默认端点。",
 	"https://api.search.tinyfish.ai",
 );
 
 const search1apiBaseUrlBinding = baseUrlBinding(
 	"search1apiBaseUrl",
 	"Search1API",
-	"Optional gateway override; search and crawl requests are routed there. Empty uses the default endpoint.",
+	"可选的网关覆盖；搜索和抓取请求会发到这里。留空则使用默认端点。",
 	"https://api.search1api.com",
 );
 
 const searchinfinityBaseUrlBinding = baseUrlBinding(
 	"searchinfinityBaseUrl",
 	"Searchinfinity",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://torchlight.byteintlapi.com/search_api/web_search",
 );
 
 const queritBaseUrlBinding = baseUrlBinding(
 	"queritBaseUrl",
 	"Querit",
-	"Optional gateway override; search and contents requests are routed there. Empty uses the default endpoint.",
+	"可选的网关覆盖；搜索和正文请求会发到这里。留空则使用默认端点。",
 	"https://api.querit.ai",
 );
 
 const tavilyBaseUrlBinding = baseUrlBinding(
 	"tavilyBaseUrl",
 	"Tavily",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.tavily.com/search",
 );
 
 const serpdiveBaseUrlBinding = baseUrlBinding(
 	"serpdiveBaseUrl",
 	"SERPdive",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.serpdive.com/v1/search",
 );
 
 const kagiBaseUrlBinding = baseUrlBinding(
 	"kagiBaseUrl",
 	"Kagi",
-	"Optional gateway override; search and extract requests are routed there. Empty uses the default endpoint.",
+	"可选的网关覆盖；搜索和提取请求会发到这里。留空则使用默认端点。",
 	"https://kagi.com",
 );
 
 const ollamaBaseUrlBinding = baseUrlBinding(
 	"ollamaBaseUrl",
 	"Ollama Cloud",
-	"Optional gateway override; search and fetch requests are routed there. Empty uses the default endpoint.",
+	"可选的网关覆盖；搜索和抓取请求会发到这里。留空则使用默认端点。",
 	"https://ollama.com",
 );
 
 const exaBaseUrlBinding = baseUrlBinding(
 	"exaBaseUrl",
 	"Exa",
-	"Optional gateway override for the direct answer and search APIs; the zero-config Exa MCP tool is not affected. Empty uses the default endpoint.",
+	"可选的网关覆盖，用于直接回答和搜索 API；零配置的 Exa MCP 工具不受影响。留空则使用默认端点。",
 	"https://api.exa.ai",
 );
 
 const perplexityBaseUrlBinding = baseUrlBinding(
 	"perplexityBaseUrl",
 	"Perplexity",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.perplexity.ai/chat/completions",
 );
 
 const anysearchBaseUrlBinding = baseUrlBinding(
 	"anysearchBaseUrl",
 	"AnySearch",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.anysearch.com/v1/search",
 );
 
 const xaiBaseUrlBinding = baseUrlBinding(
 	"xaiBaseUrl",
 	"xAI",
-	"Optional Responses-compatible endpoint override. Empty uses the default endpoint.",
+	"可选的 Responses 兼容端点覆盖。留空则使用默认端点。",
 	"https://api.x.ai/v1/responses",
 );
 
 const brightdataBaseUrlBinding = baseUrlBinding(
 	"brightdataBaseUrl",
 	"Bright Data",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.brightdata.com/request",
 );
 
 const serpbaseBaseUrlBinding = baseUrlBinding(
 	"serpbaseBaseUrl",
 	"SerpBase",
-	"Optional endpoint override. Empty uses the default endpoint.",
+	"可选的端点覆盖。留空则使用默认端点。",
 	"https://api.serpbase.dev/google/search",
 );
 
 const geminiBaseUrlBinding = baseUrlBinding(
 	"geminiBaseUrl",
 	"Gemini",
-	"Optional bare gateway URL without an API version suffix. Empty uses the default endpoint.",
+	"可选的裸网关 URL，不要带 API 版本后缀。留空则使用默认端点。",
 	"https://generativelanguage.googleapis.com",
 );
 
 const searxngBaseUrlBinding = baseUrlBinding(
 	"searxngBaseUrl",
 	"SearXNG",
-	"Self-hosted SearXNG search instance. Search is routed here first when configured.",
+	"自托管的 SearXNG 搜索实例。配置后搜索会优先发到这里。",
 	"https://search.example.com",
 );
 
 const firecrawlBaseUrlBinding = baseUrlBinding(
 	"firecrawlBaseUrl",
 	"Firecrawl",
-	"Optional firewall-compatible Firecrawl server for blocked-content extraction.",
+	"可选的兼容防火墙的 Firecrawl 服务器，用于提取被拦截的内容。",
 	"https://api.firecrawl.dev",
 );
 
 const openaiSearchModelBinding: ConfigBinding = {
 	setting: {
 		id: "openaiSearchModel",
-		label: "OpenAI search model",
-		description: "Optional model id for OpenAI Responses web search.",
+		label: "OpenAI 搜索模型",
+		description: "OpenAI Responses 网页搜索的可选模型 ID。",
 		type: "text",
 		placeholder: "gpt-5.6-terra",
 	},
@@ -462,8 +462,8 @@ const openaiSearchModelBinding: ConfigBinding = {
 const xaiSearchModelBinding: ConfigBinding = {
 	setting: {
 		id: "xaiSearchModel",
-		label: "xAI search model",
-		description: "Optional Grok model id for xAI hosted web search.",
+		label: "xAI 搜索模型",
+		description: "xAI 托管网页搜索的可选 Grok 模型 ID。",
 		type: "text",
 		placeholder: "grok-4.5",
 	},
@@ -474,13 +474,13 @@ const xaiSearchModelBinding: ConfigBinding = {
 const serpdiveModelBinding: ConfigBinding = {
 	setting: {
 		id: "serpdiveModel",
-		label: "SERPdive retrieval depth",
-		description: "Krill is the free tier; Mako and Moby consume paid credits.",
+		label: "SERPdive 检索深度",
+		description: "Krill 是免费档；Mako 和 Moby 会消耗付费额度。",
 		type: "select",
 		options: [
-			{ value: "krill", label: "Krill - free" },
-			{ value: "mako", label: "Mako - focused" },
-			{ value: "moby", label: "Moby - full content" },
+			{ value: "krill", label: "Krill - 免费" },
+			{ value: "mako", label: "Mako - 精选" },
+			{ value: "moby", label: "Moby - 全文" },
 		],
 	},
 	path: ["serpdiveModel"],
@@ -490,8 +490,8 @@ const serpdiveModelBinding: ConfigBinding = {
 const githubCloneEnabledBinding: ConfigBinding = {
 	setting: {
 		id: "githubCloneEnabled",
-		label: "GitHub repository cloning",
-		description: "Allow repository-aware extraction for GitHub URLs.",
+		label: "克隆 GitHub 仓库",
+		description: "允许按仓库理解 GitHub URL 并提取内容。",
 		type: "toggle",
 	},
 	path: ["githubClone", "enabled"],
@@ -501,8 +501,8 @@ const githubCloneEnabledBinding: ConfigBinding = {
 const githubMaxRepoSizeMBBinding: ConfigBinding = {
 	setting: {
 		id: "githubMaxRepoSizeMB",
-		label: "GitHub clone size limit",
-		description: "Repositories above this size use a lightweight API view.",
+		label: "GitHub 克隆大小上限",
+		description: "超过此大小的仓库改用轻量 API 视图。",
 		type: "number",
 		min: 1,
 	},
@@ -513,8 +513,8 @@ const githubMaxRepoSizeMBBinding: ConfigBinding = {
 const githubCloneTimeoutSecondsBinding: ConfigBinding = {
 	setting: {
 		id: "githubCloneTimeoutSeconds",
-		label: "GitHub clone timeout",
-		description: "Maximum seconds allowed for a repository clone.",
+		label: "GitHub 克隆超时",
+		description: "克隆仓库允许的最长秒数。",
 		type: "number",
 		min: 1,
 		max: 600,
@@ -526,8 +526,8 @@ const githubCloneTimeoutSecondsBinding: ConfigBinding = {
 const githubClonePathBinding: ConfigBinding = {
 	setting: {
 		id: "githubClonePath",
-		label: "GitHub clone cache path",
-		description: "Absolute runtime path for temporary repository clones.",
+		label: "GitHub 克隆缓存路径",
+		description: "临时仓库克隆的运行时绝对路径。",
 		type: "text",
 		placeholder: "/tmp/pi-github-repos",
 	},
@@ -538,8 +538,8 @@ const githubClonePathBinding: ConfigBinding = {
 const youtubeEnabledBinding: ConfigBinding = {
 	setting: {
 		id: "youtubeEnabled",
-		label: "YouTube understanding",
-		description: "Extract transcripts and analyze videos when available.",
+		label: "理解 YouTube",
+		description: "在可用时提取字幕并分析视频。",
 		type: "toggle",
 	},
 	path: ["youtube", "enabled"],
@@ -549,8 +549,8 @@ const youtubeEnabledBinding: ConfigBinding = {
 const youtubePreferredModelBinding: ConfigBinding = {
 	setting: {
 		id: "youtubePreferredModel",
-		label: "YouTube model",
-		description: "Preferred Gemini model for transcript and video understanding.",
+		label: "YouTube 模型",
+		description: "用于字幕和视频理解的首选 Gemini 模型。",
 		type: "text",
 		placeholder: "gemini-3.6-flash",
 	},
@@ -561,8 +561,8 @@ const youtubePreferredModelBinding: ConfigBinding = {
 const videoEnabledBinding: ConfigBinding = {
 	setting: {
 		id: "videoEnabled",
-		label: "Local video analysis",
-		description: "Allow supported local video files to be analyzed.",
+		label: "本地视频分析",
+		description: "允许分析支持的本地视频文件。",
 		type: "toggle",
 	},
 	path: ["video", "enabled"],
@@ -572,8 +572,8 @@ const videoEnabledBinding: ConfigBinding = {
 const videoPreferredModelBinding: ConfigBinding = {
 	setting: {
 		id: "videoPreferredModel",
-		label: "Local video model",
-		description: "Preferred Gemini model for local video analysis.",
+		label: "本地视频模型",
+		description: "用于本地视频分析的首选 Gemini 模型。",
 		type: "text",
 		placeholder: "gemini-3.6-flash",
 	},
@@ -584,8 +584,8 @@ const videoPreferredModelBinding: ConfigBinding = {
 const videoMaxSizeMBBinding: ConfigBinding = {
 	setting: {
 		id: "videoMaxSizeMB",
-		label: "Local video size limit",
-		description: "Maximum local video upload size in MB.",
+		label: "本地视频大小上限",
+		description: "本地视频上传的最大体积，单位 MB。",
 		type: "number",
 		min: 1,
 	},
@@ -596,8 +596,8 @@ const videoMaxSizeMBBinding: ConfigBinding = {
 const pdfMaxSizeMBBinding: ConfigBinding = {
 	setting: {
 		id: "pdfMaxSizeMB",
-		label: "PDF size limit",
-		description: "Maximum PDF download size in MB.",
+		label: "PDF 大小上限",
+		description: "PDF 下载的最大体积，单位 MB。",
 		type: "number",
 		min: 1,
 		max: 50,
@@ -609,8 +609,8 @@ const pdfMaxSizeMBBinding: ConfigBinding = {
 const firecrawlFreshScrapeBinding: ConfigBinding = {
 	setting: {
 		id: "firecrawlFreshScrape",
-		label: "Allow fresh Firecrawl requests",
-		description: "Permit the configured Firecrawl server to fetch targets not already cached.",
+		label: "允许 Firecrawl 即时抓取",
+		description: "允许已配置的 Firecrawl 服务器抓取尚未缓存的目标。",
 		type: "toggle",
 	},
 	path: ["firecrawlFreshScrape"],
@@ -620,8 +620,8 @@ const firecrawlFreshScrapeBinding: ConfigBinding = {
 const allowBrowserCookiesBinding: ConfigBinding = {
 	setting: {
 		id: "allowBrowserCookies",
-		label: "Gemini browser cookies",
-		description: "Allow read-only Chromium cookie discovery for Gemini Web.",
+		label: "Gemini 浏览器 Cookie",
+		description: "允许只读发现 Chromium Cookie，供 Gemini Web 使用。",
 		type: "toggle",
 	},
 	path: ["allowBrowserCookies"],
@@ -631,8 +631,8 @@ const allowBrowserCookiesBinding: ConfigBinding = {
 const chromeProfileBinding: ConfigBinding = {
 	setting: {
 		id: "chromeProfile",
-		label: "Chromium profile",
-		description: "Optional profile name used for Gemini Web cookie discovery.",
+		label: "Chromium 配置文件",
+		description: "用于 Gemini Web Cookie 发现的可选配置文件名。",
 		type: "text",
 		placeholder: "Profile 2",
 	},
@@ -643,8 +643,8 @@ const chromeProfileBinding: ConfigBinding = {
 const trustEnvProxyBinding: ConfigBinding = {
 	setting: {
 		id: "trustEnvProxy",
-		label: "Trust configured environment proxy",
-		description: "Skip hostname DNS preflight only when an HTTP(S) proxy applies.",
+		label: "信任已配置的环境代理",
+		description: "仅在适用 HTTP(S) 代理时跳过主机名 DNS 预检。",
 		type: "toggle",
 	},
 	path: ["ssrf", "trustEnvProxy"],
@@ -654,8 +654,8 @@ const trustEnvProxyBinding: ConfigBinding = {
 const ssrfAllowRangesBinding: ConfigBinding = {
 	setting: {
 		id: "ssrfAllowRanges",
-		label: "Allowed proxy ranges",
-		description: "Comma-separated CIDRs for narrow fake-IP or private proxy ranges.",
+		label: "允许的代理网段",
+		description: "用逗号分隔的 CIDR，用于窄范围伪造 IP 或私有代理网段。",
 		type: "text",
 		placeholder: "198.18.0.0/15, fd00::/8",
 	},
@@ -668,8 +668,8 @@ const ssrfAllowRangesBinding: ConfigBinding = {
 const fetchDomainAllowBinding: ConfigBinding = {
 	setting: {
 		id: "fetchDomainAllow",
-		label: "Allowed fetch domains",
-		description: "Optional comma-separated allowlist for fetch_content.",
+		label: "允许抓取的域名",
+		description: "可选的逗号分隔白名单，用于 fetch_content。",
 		type: "text",
 		placeholder: "docs.example.com, github.com",
 	},
@@ -682,8 +682,8 @@ const fetchDomainAllowBinding: ConfigBinding = {
 const fetchDomainDenyBinding: ConfigBinding = {
 	setting: {
 		id: "fetchDomainDeny",
-		label: "Blocked fetch domains",
-		description: "Optional comma-separated denylist; deny rules take precedence.",
+		label: "禁止抓取的域名",
+		description: "可选的逗号分隔黑名单；拒绝规则优先。",
 		type: "text",
 		placeholder: "internal.example.com",
 	},
@@ -696,8 +696,8 @@ const fetchDomainDenyBinding: ConfigBinding = {
 const firecrawlApiVersionBinding: ConfigBinding = {
 	setting: {
 		id: "firecrawlApiVersion",
-		label: "Firecrawl API version",
-		description: "Use v1 only for older self-hosted deployments.",
+		label: "Firecrawl API 版本",
+		description: "仅在较旧的自托管部署上使用 v1。",
 		type: "select",
 		options: [{ value: "v2", label: "v2" }, { value: "v1", label: "v1" }],
 	},
@@ -708,8 +708,8 @@ const firecrawlApiVersionBinding: ConfigBinding = {
 const brightdataSerpZoneBinding: ConfigBinding = {
 	setting: {
 		id: "brightdataSerpZone",
-		label: "Bright Data SERP zone",
-		description: "Required zone of Bright Data type serp for paid SERP search.",
+		label: "Bright Data SERP Zone",
+		description: "付费 SERP 搜索所需的 Bright Data serp 类型 Zone。",
 		type: "text",
 		placeholder: "pi_serp",
 	},
@@ -720,8 +720,8 @@ const brightdataSerpZoneBinding: ConfigBinding = {
 const brightdataUnlockerZoneBinding: ConfigBinding = {
 	setting: {
 		id: "brightdataUnlockerZone",
-		label: "Bright Data Unlocker zone",
-		description: "Required zone of Bright Data type unblocker for the paid fetch fallback.",
+		label: "Bright Data Unlocker Zone",
+		description: "付费抓取回退所需的 Bright Data unblocker 类型 Zone。",
 		type: "text",
 		placeholder: "pi_unlocker",
 	},
@@ -873,10 +873,10 @@ function providerSection(provider: string): AetherSettingsSection & { bindings: 
 	}
 	return {
 		id: "provider",
-		title: "Provider",
+		title: "服务商",
 		description: section
-			? `Default provider and ${section.label} configuration. Credentials are persisted in the existing Pi config file.`
-			: "Pick a specific provider above to configure its API key, base URL, and provider-specific options.",
+			? `默认服务商及 ${section.label} 配置。凭据保存在现有的 Pi 配置文件中。`
+			: "在上方选择具体服务商，以配置其 API Key、Base URL 和专属选项。",
 		settings: bindings.map((item) => item.setting),
 		bindings,
 	};
@@ -884,16 +884,16 @@ function providerSection(provider: string): AetherSettingsSection & { bindings: 
 
 const toolsSection: AetherSettingsSection = {
 	id: "tools",
-	title: "Web search tools",
-	description: "Register search and source-check tools after the next extension reload.",
+	title: "网页搜索工具",
+	description: "下次重新加载插件后注册搜索和来源核对工具。",
 	settings: [webSearchEnabledBinding.setting],
 };
 
 /** Fallback layout for Aether builds that do not render page-level sections yet. */
 const generalCategory: AetherSettingsCategory = {
 	id: "general",
-	title: "Web search tools",
-	subtitle: "Master switch for web search and source verification",
+	title: "网页搜索工具",
+	subtitle: "网页搜索和来源核对的总开关",
 	icon: "auto",
 	order: 0,
 	sections: [toolsSection],
@@ -901,27 +901,27 @@ const generalCategory: AetherSettingsCategory = {
 
 const extractionCategory: AetherSettingsCategory = {
 	id: "extraction",
-	title: "Context Extraction",
-	subtitle: "GitHub, video, and PDF handling",
+	title: "内容提取",
+	subtitle: "GitHub、视频和 PDF 处理",
 	icon: "code",
 	order: 2,
 	sections: [
 		{
 			id: "github",
 			title: "GitHub",
-			description: "Repository cloning, cache path, and size limits",
+			description: "仓库克隆、缓存路径和大小上限",
 			settings: githubBindings.map((item) => item.setting),
 		},
 		{
 			id: "youtube",
 			title: "YouTube",
-			description: "Transcript and video understanding for YouTube and local files",
+			description: "YouTube 与本地文件的字幕和视频理解",
 			settings: youtubeBindings.map((item) => item.setting),
 		},
 		{
 			id: "pdf",
 			title: "PDF",
-			description: "PDF download limits",
+			description: "PDF 下载上限",
 			settings: pdfBindings.map((item) => item.setting),
 		},
 	],
@@ -929,14 +929,14 @@ const extractionCategory: AetherSettingsCategory = {
 
 const privacyCategory: AetherSettingsCategory = {
 	id: "privacy",
-	title: "Privacy and network",
-	subtitle: "Browser data access, SSRF exceptions, and fetch domain policy",
+	title: "隐私与网络",
+	subtitle: "浏览器数据访问、SSRF 例外和抓取域名策略",
 	icon: "info",
 	order: 3,
 	sections: [{
 		id: "privacy",
-		title: "Privacy and network",
-		description: "SSRF exceptions and fetch domain policy",
+		title: "隐私与网络",
+		description: "SSRF 例外和抓取域名策略",
 		settings: privacyBindings.map((item) => item.setting),
 	}],
 };
@@ -945,16 +945,16 @@ function categoriesForProvider(provider: string): AetherSettingsCategory[] {
 	return [
 		{
 			id: "provider",
-			title: "Provider",
-			subtitle: "Default search provider, credentials, and base URLs",
+			title: "服务商",
+			subtitle: "默认搜索服务商、凭据和基础 URL",
 			icon: "auto",
 			order: 1,
 			sections: [
 				providerSection(provider),
 				{
 					id: "advanced",
-					title: "Advanced",
-					description: "Routing, review workflow, and summary model",
+					title: "高级",
+					description: "路由、审阅工作流和摘要模型",
 					settings: advancedBindings.map((item) => item.setting),
 				},
 			],
@@ -1058,9 +1058,9 @@ function statusCard(api: AetherExtensionAPI, title: string, message: AetherJsonO
 	const details = message.details && typeof message.details === "object" ? message.details as AetherJsonObject : message;
 	const chips = [
 		typeof details.provider === "string" ? details.provider : "",
-		typeof details.sourceCount === "number" ? `${details.sourceCount} sources` : "",
-		typeof details.totalResults === "number" ? `${details.totalResults} results` : "",
-		typeof details.successfulQueries === "number" && typeof details.queryCount === "number" ? `${details.successfulQueries}/${details.queryCount} queries` : "",
+		typeof details.sourceCount === "number" ? `${details.sourceCount} 个来源` : "",
+		typeof details.totalResults === "number" ? `${details.totalResults} 条结果` : "",
+		typeof details.successfulQueries === "number" && typeof details.queryCount === "number" ? `${details.successfulQueries}/${details.queryCount} 次查询` : "",
 		typeof details.successful === "number" && typeof details.total === "number" ? `${details.successful}/${details.total}` : "",
 	].filter(Boolean);
 	return api.ui.card([
@@ -1074,11 +1074,11 @@ function statusCard(api: AetherExtensionAPI, title: string, message: AetherJsonO
 
 function messageTypes(api: AetherExtensionAPI): AetherMessageTypeDefinition[] {
 	return [
-		{ type: "web-search-results", title: "Web research", icon: "auto", render: ({ message }) => statusCard(api, "Web research", message) },
-		{ type: "web-search-content-ready", title: "Web content ready", icon: "refresh", render: ({ message }) => statusCard(api, "Web content ready", message) },
-		{ type: "web-search-error", title: "Web access error", icon: "warning", render: ({ message }) => statusCard(api, "Web access error", message, "error") },
-		{ type: "curator-config", title: "Search workflow", icon: "settings", render: ({ message }) => statusCard(api, "Search workflow updated", message) },
-		{ type: "google-account", title: "Gemini Web account", icon: "info", render: ({ message }) => statusCard(api, "Gemini Web account", message) },
+		{ type: "web-search-results", title: "网页研究", icon: "auto", render: ({ message }) => statusCard(api, "网页研究", message) },
+		{ type: "web-search-content-ready", title: "网页内容已就绪", icon: "refresh", render: ({ message }) => statusCard(api, "网页内容已就绪", message) },
+		{ type: "web-search-error", title: "网页访问出错", icon: "warning", render: ({ message }) => statusCard(api, "网页访问出错", message, "error") },
+		{ type: "curator-config", title: "搜索工作流", icon: "settings", render: ({ message }) => statusCard(api, "搜索工作流已更新", message) },
+		{ type: "google-account", title: "Gemini Web 账号", icon: "info", render: ({ message }) => statusCard(api, "Gemini Web 账号", message) },
 	];
 }
 
@@ -1100,10 +1100,10 @@ export async function appendAetherWebMessage(
 }
 
 const webToolTitles = [
-	["web_search", "Searching the web", "Searched the web"],
-	["source_check", "Checking sources", "Checked sources"],
-	["fetch_content", "Fetching web content", "Fetched web content"],
-	["get_search_content", "Reading web content", "Read web content"],
+	["web_search", "正在搜索网页", "已搜索网页"],
+	["source_check", "正在核对来源", "已核对来源"],
+	["fetch_content", "正在抓取网页内容", "已抓取网页内容"],
+	["get_search_content", "正在阅读网页内容", "已阅读网页内容"],
 ] as const;
 
 export const activateAether = async (aether: AetherExtensionAPI) => {
@@ -1116,7 +1116,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 		config = readConfig();
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		aether.host.invoke("app.notify", { message: `Web Access settings could not read the Pi config: ${message}` }).catch(() => {});
+		aether.host.invoke("app.notify", { message: `网页访问设置无法读取 Pi 配置：${message}` }).catch(() => {});
 	}
 	const storage = aether.storage.snapshot();
 	const settingStorageKey = (settingId: string) => `settings:${SETTINGS_PAGE_ID}:${settingId}`;
@@ -1143,8 +1143,8 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 	const registerSettingsPage = (providerValue: string) => {
 		const definition = {
 			id: SETTINGS_PAGE_ID,
-			title: "Web Access",
-			subtitle: "Search, source verification, extraction, and provider routing",
+			title: "网页访问",
+			subtitle: "搜索、来源核对、内容提取和服务商路由",
 			icon: "auto",
 			order: 20,
 			sections: [toolsSection],
@@ -1175,7 +1175,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 				if (binding.sensitive) {
 					aether.storage.set(binding.setting.id, value);
 					aether.storage.set(settingStorageKey(binding.setting.id), value);
-					await aether.host.invoke("app.notify", { message: "Credential or base URL updated. Reload the Pi extension to apply it." }).catch(() => {});
+					await aether.host.invoke("app.notify", { message: "凭据或 Base URL 已更新。重新加载 Pi 插件后生效。" }).catch(() => {});
 					return { setting: binding.setting.id, value };
 				}
 				aether.storage.set(binding.setting.id, value);
@@ -1188,7 +1188,7 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 					aether.storage.set(settingStorageKey("provider"), "auto");
 					registerSettingsPage("auto");
 				}
-				await aether.host.invoke("app.notify", { message: "Web Access setting saved. Reload the Pi extension to apply it." }).catch(() => {});
+				await aether.host.invoke("app.notify", { message: "网页访问设置已保存。重新加载 Pi 插件后生效。" }).catch(() => {});
 				return { setting: binding.setting.id, value };
 			});
 		}
@@ -1201,12 +1201,12 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 
 	aether.registerAction("dismiss-latest-activity", () => aether.storage.delete("latestActivity"));
 	aether.registerAction("research-draft", async () => {
-		await aether.host.invoke("app.appendDraftInput", { text: "Research this on the web with multiple independent sources: " });
+		await aether.host.invoke("app.appendDraftInput", { text: "请用多个独立来源在网上研究：" });
 	});
 	aether.registerComposerMenuItem({
 		id: "research-web",
-		title: "Research on the web",
-		subtitle: "Draft a multi-source research request",
+		title: "在网页上研究",
+		subtitle: "起草一份多来源研究请求",
 		icon: "auto",
 		order: 30,
 		action: "research-draft",
@@ -1222,10 +1222,10 @@ export const activateAether = async (aether: AetherExtensionAPI) => {
 			const activity = latest as AetherJsonObject;
 			const payload = activity.payload && typeof activity.payload === "object" ? activity.payload as AetherJsonObject : {};
 			const type = String(activity.type ?? "");
-			const title = type === "web-search-error" ? "Web access error" : type === "web-search-content-ready" ? "Web content ready" : "Latest web activity";
+			const title = type === "web-search-error" ? "网页访问出错" : type === "web-search-content-ready" ? "网页内容已就绪" : "最近的网页活动";
 			return aether.ui.column([
 				statusCard(aether, title, { ...payload, text: activity.text }, type === "web-search-error" ? "error" : "neutral"),
-				aether.ui.button("Dismiss", "dismiss-latest-activity", { tone: "neutral", icon: "close" }),
+				aether.ui.button("关闭", "dismiss-latest-activity", { tone: "neutral", icon: "close" }),
 			], { spacing: 6 });
 		},
 	});
