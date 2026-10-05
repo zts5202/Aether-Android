@@ -11,6 +11,11 @@
     <string name="message_root_setup_failed">Root setup failed: %1$s</string>
     <string name="message_update_download_failed">Couldn't download update: %1$s</string>
     <string name="message_pause_before_deleting_session">Pause this session before deleting it.</string>
+    <string name="message_pause_before_clearing_sessions">Pause any running chat before clearing all chats.</string>
+    <string name="message_sessions_cleared">All chats cleared</string>
+    <string name="chat_clear_all_sessions">Clear all</string>
+    <string name="chat_clear_all_sessions_title">Clear all chats?</string>
+    <string name="chat_clear_all_sessions_message">Every chat in this list will be deleted. This cannot be undone.</string>
     <string name="message_session_exported">Session exported</string>
     <string name="message_session_export_failed">Couldn't export session</string>
     <string name="message_app_data_exported">App data exported</string>

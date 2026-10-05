@@ -340,6 +340,11 @@ class ChatRepository(
         return database.withTransaction { chatHistoryDao.getAgentSession(chatSessionId) }
     }
 
+    suspend fun getAllAgentSessionMetadata(): List<ChatAgentSessionEntity> {
+        migrateLegacyChatStateIfNeeded()
+        return database.withTransaction { chatHistoryDao.getAgentSessions() }
+    }
+
     suspend fun getAgentMessageEntryIds(chatSessionId: String, messageId: String): List<String> {
         migrateLegacyChatStateIfNeeded()
         return database.withTransaction {
@@ -398,6 +403,16 @@ class ChatRepository(
             if (meta?.currentSessionId == sessionId) {
                 chatHistoryDao.upsertMeta(meta.copy(currentSessionId = null))
             }
+        }
+    }
+
+    suspend fun getWorkspaceFilePathsForClearingAllSessions(): List<String> {
+        migrateLegacyChatStateIfNeeded()
+        return database.withTransaction {
+            if (chatHistoryDao.getMeta()?.workspaceFileRefsComplete != true) {
+                return@withTransaction emptyList()
+            }
+            chatHistoryDao.getAllWorkspaceFilePaths().normalizedWorkspaceFilePaths()
         }
     }
 

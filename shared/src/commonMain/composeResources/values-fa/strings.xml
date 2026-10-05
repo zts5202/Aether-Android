@@ -11,6 +11,11 @@
     <string name="message_root_setup_failed">راه اندازی ریشه انجام نشد: %1$s</string>
     <string name="message_update_download_failed">به‌روزرسانی دانلود نشد: %1$s</string>
     <string name="message_pause_before_deleting_session">قبل از حذف این جلسه، آن را متوقف کنید.</string>
+    <string name="message_pause_before_clearing_sessions">قبل از پاک کردن همه گفتگوها، گفتگوی در حال اجرا را متوقف کنید.</string>
+    <string name="message_sessions_cleared">همه گفتگوها پاک شد</string>
+    <string name="chat_clear_all_sessions">پاک کردن همه</string>
+    <string name="chat_clear_all_sessions_title">همه گفتگوها پاک شود؟</string>
+    <string name="chat_clear_all_sessions_message">همه گفتگوهای این فهرست حذف می‌شوند و قابل بازگردانی نیستند.</string>
     <string name="message_session_exported">جلسه صادر شد</string>
     <string name="message_session_export_failed">جلسه صادر نشد. فضای ذخیره‌سازی موجود را بررسی کنید و دوباره امتحان کنید.</string>
     <string name="message_app_data_exported">داده های برنامه صادر شد</string>

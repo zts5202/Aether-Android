@@ -144,6 +144,13 @@ interface ChatHistoryDao {
     @Query("""
         SELECT DISTINCT path
         FROM chat_workspace_file_refs
+        ORDER BY path ASC
+    """)
+    suspend fun getAllWorkspaceFilePaths(): List<String>
+
+    @Query("""
+        SELECT DISTINCT path
+        FROM chat_workspace_file_refs
         WHERE sessionId = :sessionId
         ORDER BY path ASC
     """)
