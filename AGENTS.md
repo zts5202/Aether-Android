@@ -45,3 +45,13 @@
 - 默认禁止构建或安装 `app-debug-androidTest.apk` 等测试包；以后不需要安装测试包，除非用户明确要求。
 
 - 更完整的排查命令（诊断日志、容器 DNS、扩展目录、会话文件）见 [`HANDOFF.md`](HANDOFF.md) 第 7 节。
+
+## Cursor Cloud specific instructions
+
+云端虚拟机没有小米真机。`adb devices -l` 列出目标 serial 之后，才使用上面的推送安装流程。云端验证用这些命令：
+
+- `pi-bridge`：`npm run check`，然后 `npm test`。`package.json` 要求 Node `>=22.19.0`。安装脚本把该版本放到 `/usr/local/lib/nodejs`，并链接到 `/usr/local/cargo/bin`，登录 shell 会优先使用这个 Node。
+- `packages/extension-api`：`npm run check`
+- Android：`./gradlew :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug`
+
+Android SDK 在 `/opt/android-sdk`。安装脚本写入 gitignore 的 `local.properties`（`sdk.dir=/opt/android-sdk`）。镜像自带 JDK 21，可以编译 `jvmTarget` 17。`~/.gradle/gradle.properties` 把 Gradle 堆限制在 3g，因为仓库 `gradle.properties` 申请 8g，而云端机器大约 16GB 内存。debug APK 只含 `arm64-v8a`（`app/build/outputs/apk/debug/app-debug.apk`，包名 `com.baimoqilin.aether.debug`），不能安装到这台 x86_64 虚拟机。
