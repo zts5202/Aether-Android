@@ -55,3 +55,10 @@
 - Android：`./gradlew :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug`
 
 Android SDK 在 `/opt/android-sdk`。安装脚本写入 gitignore 的 `local.properties`（`sdk.dir=/opt/android-sdk`）。镜像自带 JDK 21，可以编译 `jvmTarget` 17。`~/.gradle/gradle.properties` 把 Gradle 堆限制在 3g，因为仓库 `gradle.properties` 申请 8g，而云端机器大约 16GB 内存。debug APK 只含 `arm64-v8a`（`app/build/outputs/apk/debug/app-debug.apk`，包名 `com.baimoqilin.aether.debug`），不能安装到这台 x86_64 虚拟机。
+
+用户用手机试用的约定：
+
+- 在云端跑命令、编译、测试不会自动出现在 GitHub。有需要用户装到手机上看的代码改动时，提交并推送到拉取请求。
+- 拉取请求改了 Android 相关路径后，`pr-check.yml` 会上传调试包 Artifact（约保留 7 天）。告诉用户：等该检查通过，在 Actions 的 Artifacts 下载 apk，传到手机安装。手机上的包名是 `com.baimoqilin.aether.debug`。
+- 合并进 `main` 且改动命中 `build-nightly-apk.yml` 的路径后，滚动预发布 `nightly` 会更新 `Aether-nightly.apk`。手机上显示为 **Aether Nightly**，包名是 `com.baimoqilin.aether.nightly`。
+- 云端虚拟机不负责把包装进手机。只有 `adb devices -l` 能看到目标手机时，才走上面的真机推送安装。
