@@ -36,10 +36,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -69,6 +71,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.zhousl.aether.shared.resources.Res
+import com.zhousl.aether.shared.resources.chat_clear_all_sessions
+import com.zhousl.aether.shared.resources.chat_clear_all_sessions_message
+import com.zhousl.aether.shared.resources.chat_clear_all_sessions_title
+import com.zhousl.aether.shared.resources.common_cancel
 import com.zhousl.aether.shared.resources.common_chat
 import com.zhousl.aether.shared.resources.common_delete
 import com.zhousl.aether.shared.resources.common_export
@@ -111,6 +117,7 @@ fun AetherConversationDrawer(
     onRenameSession: (String, String) -> Unit,
     onExportSession: (String) -> Unit,
     onDeleteSession: (String) -> Unit,
+    onClearAllSessions: () -> Unit,
     onSettingsSelected: () -> Unit,
     permanent: Boolean = false,
     extraContent: @Composable ((dismissSearch: () -> Unit) -> Unit) = {},
@@ -119,6 +126,7 @@ fun AetherConversationDrawer(
 ) {
     var searchExpanded by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var confirmClearAll by remember { mutableStateOf(false) }
     var overlayHeightPx by remember { mutableIntStateOf(0) }
     var footerHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
@@ -135,6 +143,46 @@ fun AetherConversationDrawer(
         searchQuery = ""
     }
     val drawerBackground = if (permanent) AetherBackground else AetherSidebarBackground
+
+    if (confirmClearAll) {
+        AlertDialog(
+            onDismissRequest = { confirmClearAll = false },
+            containerColor = AetherSurface,
+            title = {
+                Text(
+                    text = stringResource(Res.string.chat_clear_all_sessions_title),
+                    color = AetherOnSurface,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(Res.string.chat_clear_all_sessions_message),
+                    color = AetherOnSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearAll = false
+                        onClearAllSessions()
+                    },
+                ) {
+                    Text(
+                        text = stringResource(Res.string.chat_clear_all_sessions),
+                        color = Color(0xFFB42318),
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearAll = false }) {
+                    Text(
+                        text = stringResource(Res.string.common_cancel),
+                        color = AetherOnSurface,
+                    )
+                }
+            },
+        )
+    }
 
     ModalDrawerSheet(
         modifier = Modifier.fillMaxHeight().width(if (permanent) 320.dp else 322.dp),
@@ -250,6 +298,22 @@ fun AetherConversationDrawer(
                                 size = 46.dp,
                                 containerColor = Color.Transparent,
                                 showHalo = false,
+                            )
+                        }
+                    }
+                    if (sessions.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Text(
+                                text = stringResource(Res.string.chat_clear_all_sessions),
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                                color = Color(0xFFB42318),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { confirmClearAll = true }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                             )
                         }
                     }

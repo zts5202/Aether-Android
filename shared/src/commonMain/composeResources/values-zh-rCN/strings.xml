@@ -11,6 +11,11 @@
     <string name="message_root_setup_failed">Root 设置失败：%1$s</string>
     <string name="message_update_download_failed">无法下载更新：%1$s</string>
     <string name="message_pause_before_deleting_session">请先暂停此会话，再删除它。</string>
+    <string name="message_pause_before_clearing_sessions">请先暂停正在进行的会话，再清除全部记录。</string>
+    <string name="message_sessions_cleared">已清除全部会话</string>
+    <string name="chat_clear_all_sessions">全部清除</string>
+    <string name="chat_clear_all_sessions_title">清除全部会话？</string>
+    <string name="chat_clear_all_sessions_message">最近的聊天记录都会被删除，而且不能恢复。</string>
     <string name="message_session_exported">会话已导出</string>
     <string name="message_session_export_failed">无法导出会话</string>
     <string name="message_app_data_exported">应用数据已导出</string>

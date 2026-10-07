@@ -1922,6 +1922,58 @@ class AetherViewModel(
         }
     }
 
+    fun clearAllSessions(): Boolean {
+        if (_uiState.value.sessions.any { session -> sessionExecutionManager.isSessionRunning(session.id) }) {
+            emitTransientMessage(uiString(R.string.message_pause_before_clearing_sessions))
+            return false
+        }
+        val sessionIds = _uiState.value.sessions
+            .map { it.id }
+            .filter { it.isNotBlank() && it != DraftSessionId }
+        if (sessionIds.isEmpty()) return false
+        val deletedIds = sessionIds.toSet()
+
+        _uiState.update { current ->
+            val viewingDeletedSession = current.currentSessionId in deletedIds
+            current.copy(
+                sessions = emptyList(),
+                currentSessionId = if (viewingDeletedSession) DraftSessionId else current.currentSessionId,
+                draftInput = if (viewingDeletedSession) "" else current.draftInput,
+                draftAttachments = if (viewingDeletedSession) emptyList() else current.draftAttachments,
+                draftWorkspaceId = if (viewingDeletedSession) null else current.draftWorkspaceId,
+                draftAgentModeEnabled = if (viewingDeletedSession) false else current.draftAgentModeEnabled,
+                editingSessionId = null,
+                editingMessageId = null,
+                unviewedCompletedSessionIds = emptySet(),
+                showStarterPromptHint = false,
+            )
+        }
+        viewModelScope.launch {
+            chatStateStore.flush()
+            val sharedWorkspaceFilePaths = withContext(Dispatchers.IO) {
+                runCatching {
+                    runtime.chatRepository.getWorkspaceFilePathsForClearingAllSessions()
+                }.getOrElse { throwable ->
+                    diagnosticLogger.exception(
+                        category = "storage",
+                        event = "unreferenced_workspace_lookup_failed",
+                        throwable = throwable,
+                        level = "warn",
+                        details = mapOf(
+                            "lookup_scope" to "all_sessions",
+                            "session_count" to deletedIds.size,
+                        ),
+                    )
+                    emptyList()
+                }
+            }
+            persistDeleteSessions(sharedWorkspaceFilePaths)
+            captureAnalyticsEvent(event = "conversations cleared")
+            emitTransientMessage(uiString(R.string.message_sessions_cleared))
+        }
+        return true
+    }
+
     fun exportSessionToUri(
         sessionId: String,
         destinationUri: Uri,
@@ -4831,6 +4883,54 @@ class AetherViewModel(
         scheduleSessionRuntimeDataCleanup(
             sessionIds = listOf(sessionId),
             sharedWorkspaceFilePaths = unreferencedSharedWorkspaceFilePaths,
+            mode = _uiState.value.settings.agentWorkspaceMode,
+        )
+    }
+
+    private suspend fun persistDeleteSessions(
+        sharedWorkspaceFilePaths: Collection<String> = emptyList(),
+    ) {
+        val agentSessions = runCatching {
+            runtime.chatRepository.getAllAgentSessionMetadata()
+        }.getOrElse { throwable ->
+            diagnosticLogger.exception(
+                category = "pi_bridge",
+                event = "list_sessions_for_clear_failed",
+                throwable = throwable,
+                level = "warn",
+            )
+            emptyList()
+        }
+        agentSessions.forEach { agentSession ->
+            runCatching {
+                runtime.piKernelBridge.closeSession(
+                    sessionId = agentSession.chatSessionId,
+                    sessionFile = agentSession.jsonlPath,
+                    deleteFile = true,
+                )
+            }.onFailure { throwable ->
+                diagnosticLogger.exception(
+                    category = "pi_bridge",
+                    event = "close_deleted_session_failed",
+                    throwable = throwable,
+                    level = "warn",
+                    sessionId = agentSession.chatSessionId,
+                )
+            }
+        }
+        var deletedSessionIds = emptyList<String>()
+        chatStateStore.updateAndFlush(
+            writeIntent = PersistedChatWriteIntent.DeleteSession,
+        ) { persisted ->
+            deletedSessionIds = persisted.sessions.map { it.id }
+            persisted.copy(
+                sessions = emptyList(),
+                currentSessionId = DraftSessionId,
+            )
+        }
+        scheduleSessionRuntimeDataCleanup(
+            sessionIds = deletedSessionIds + agentSessions.map { it.chatSessionId },
+            sharedWorkspaceFilePaths = sharedWorkspaceFilePaths,
             mode = _uiState.value.settings.agentWorkspaceMode,
         )
     }
