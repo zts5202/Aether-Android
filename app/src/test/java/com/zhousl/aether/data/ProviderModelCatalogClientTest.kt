@@ -245,4 +245,92 @@ class ProviderModelCatalogClientTest {
         assertEquals(emptyList<String>(), result.levelsByProviderModel[key])
         assertEquals(emptyMap<String, Map<String, String>>(), result.levelMapsByProviderModel)
     }
+
+    @Test
+    fun miMoV26FlashExposesOnOffThinkingAndImageCapabilityOnEveryXiaomiProvider() {
+        val providerIds = listOf(
+            "xiaomi",
+            "xiaomi-token-plan-cn",
+            "xiaomi-token-plan-ams",
+            "xiaomi-token-plan-sgp",
+        )
+        val options = providerIds.map { providerId ->
+            xiaomiOption(providerId, MiMoV26FlashModelId)
+        }
+
+        val missing = publicCatalogThinkingResult(JSONObject("{}"), options)
+        val textOnlyCatalog = publicCatalogThinkingResult(
+            JSONObject(
+                """{"providers":{"xiaomi":{"models":{"mimo-v2.6-flash":{"id":"mimo-v2.6-flash","reasoning":false,"input":["text"]}}}}}""",
+            ),
+            options,
+        )
+
+        options.forEach { option ->
+            val key = thinkingCatalogKey(option.piProviderId, option.modelId)
+            assertEquals(listOf("off", "high"), missing.levelsByProviderModel[key])
+            assertEquals(miMoThinkingLevelClamps(), missing.levelMapsByProviderModel[key])
+            assertEquals(false, missing.levelMapsByProviderModel[key]?.containsKey("off"))
+            assertEquals(true, key in missing.reasoningModels)
+            assertEquals(listOf("off", "high"), textOnlyCatalog.levelsByProviderModel[key])
+            assertEquals(true, key in textOnlyCatalog.reasoningModels)
+            assertEquals(true, option.supportsImageInput)
+        }
+    }
+
+    @Test
+    fun miMoPublicEffortListIsReplacedByTheChatApiOnOffSwitch() {
+        val option = xiaomiOption("xiaomi", MiMoV26FlashModelId)
+        val catalog = JSONObject(
+            """{"providers":{"xiaomi":{"models":{"mimo-v2.6-flash":{"id":"mimo-v2.6-flash","reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high"]}]}}}}}""",
+        )
+
+        val result = publicCatalogThinkingResult(catalog, listOf(option))
+        val key = thinkingCatalogKey("xiaomi", MiMoV26FlashModelId)
+
+        assertEquals(listOf("off", "high"), result.levelsByProviderModel[key])
+        assertEquals("disabled", miMoThinkingType("off"))
+        assertEquals("enabled", miMoThinkingType("high"))
+        assertEquals("enabled", miMoThinkingType("low"))
+        assertEquals(
+            "data:image/png;base64,aGVsbG8=",
+            miMoImageDataUrl("image/png", "aGVsbG8="),
+        )
+    }
+
+    @Test
+    fun nonXiaomiModelIdsDoNotReceiveTheMiMoThinkingOverride() {
+        val config = LlmProviderConfig(
+            providerId = "openai",
+            name = "OpenAI",
+            piProviderId = "openai",
+            apiKey = "test-key",
+            baseUrl = "https://api.openai.com/v1",
+            modelId = MiMoV26FlashModelId,
+            manualModelIds = listOf(MiMoV26FlashModelId),
+            cachedModels = emptyList(),
+            enabledModelIds = listOf(MiMoV26FlashModelId),
+        )
+        val option = listOf(config).availableModelOptions().single()
+
+        val result = publicCatalogThinkingResult(JSONObject("{}"), listOf(option))
+
+        assertEquals(null, result.levelsByProviderModel[thinkingCatalogKey("openai", MiMoV26FlashModelId)])
+        assertEquals(emptySet<String>(), result.reasoningModels)
+    }
+
+    private fun xiaomiOption(providerId: String, modelId: String): ProviderModelOption {
+        val config = LlmProviderConfig(
+            providerId = providerId,
+            name = providerId,
+            piProviderId = providerId,
+            apiKey = "test-key",
+            baseUrl = "https://api.xiaomimimo.com/v1",
+            modelId = modelId,
+            manualModelIds = listOf(modelId),
+            cachedModels = listOf(modelId),
+            enabledModelIds = listOf(modelId),
+        )
+        return listOf(config).availableModelOptions().single { it.modelId == modelId }
+    }
 }

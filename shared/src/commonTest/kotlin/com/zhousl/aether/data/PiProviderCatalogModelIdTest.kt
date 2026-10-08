@@ -7,6 +7,18 @@ import kotlin.test.assertFalse
 class PiProviderCatalogModelIdTest {
 
     @Test
+    fun xiaomiProvidersDefaultToMiMoV26Flash() {
+        listOf(
+            "xiaomi",
+            "xiaomi-token-plan-cn",
+            "xiaomi-token-plan-ams",
+            "xiaomi-token-plan-sgp",
+        ).forEach { providerId ->
+            assertEquals(MiMoV26FlashModelId, PiProviderCatalog.resolve(providerId).defaultModelId)
+        }
+    }
+
+    @Test
     fun deepSeekProviderUsesTheCurrentCanonicalModelId() {
         assertEquals("deepseek-flash", PiProviderCatalog.resolve("deepseek").defaultModelId)
     }

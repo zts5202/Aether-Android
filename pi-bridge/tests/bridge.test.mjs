@@ -2534,6 +2534,108 @@ test("preserves explicit cache mode for the official OpenAI Responses endpoint",
   assert.deepEqual(api.requests.at(-1).body.prompt_cache_options, { mode: "explicit" });
 });
 
+test("reports MiMo V2.6 Flash as a reasoning vision model on every Xiaomi provider", async () => {
+  const client = new BridgeClient();
+  const catalog = await client.request("mimo-catalog", "list_providers");
+  const providerIds = [
+    "xiaomi",
+    "xiaomi-token-plan-cn",
+    "xiaomi-token-plan-ams",
+    "xiaomi-token-plan-sgp",
+  ];
+
+  for (const providerId of providerIds) {
+    const provider = catalog.providers.find((candidate) => candidate.id === providerId);
+    assert.ok(provider, providerId);
+    const model = provider.models.find((candidate) => candidate.id === "mimo-v2.6-flash");
+    assert.ok(model, providerId);
+    assert.equal(model.reasoning, true);
+    assert.ok(model.input.includes("text"));
+    assert.ok(model.input.includes("image"));
+  }
+
+  const xiaomi = catalog.providers.find((candidate) => candidate.id === "xiaomi");
+  const textOnly = xiaomi.models.find((candidate) => candidate.id === "mimo-v2.5-pro");
+  assert.equal(textOnly.reasoning, true);
+  assert.equal(textOnly.input.includes("image"), false);
+});
+
+test("maps MiMo V2.6 Flash thinking and images onto Xiaomi chat completions", async (t) => {
+  const received = [];
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      writeSuccessfulChatCompletion(response, "MIMO_OK", "mimo-v2.6-flash");
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const providerIds = [
+    "xiaomi",
+    "xiaomi-token-plan-cn",
+    "xiaomi-token-plan-ams",
+    "xiaomi-token-plan-sgp",
+  ];
+  const client = new BridgeClient();
+  const imageMessage = {
+    role: "user",
+    content: [
+      { type: "text", text: "what is in this image?" },
+      { type: "image", mime_type: "image/png", data: "aGVsbG8=" },
+    ],
+  };
+
+  for (const providerId of providerIds) {
+    for (const reasoning of ["off", "high"]) {
+      const result = await client.request(`mimo-${providerId}-${reasoning}`, "complete_once", {
+        model_config: {
+          provider_type: "builtin",
+          provider_config_id: providerId,
+          pi_provider_id: providerId,
+          pi_api: "builtin",
+          model_id: "mimo-v2.6-flash",
+          base_url: `http://127.0.0.1:${address.port}/v1`,
+          api_key: "secret-key",
+          reasoning: true,
+          thinking_level_map: {
+            minimal: "high",
+            low: "high",
+            medium: "high",
+            xhigh: "high",
+            max: "high",
+          },
+          max_retries: 0,
+        },
+        system_prompt: "Reply briefly.",
+        messages: [imageMessage],
+        reasoning,
+        stream: false,
+      });
+      assert.equal(result.assistant_text, "MIMO_OK", `${providerId} ${reasoning} ${JSON.stringify(result)}`);
+    }
+  }
+
+  assert.equal(received.length, providerIds.length * 2);
+  received.forEach((body, index) => {
+    const reasoning = index % 2 === 0 ? "off" : "high";
+    assert.equal(body.model, "mimo-v2.6-flash");
+    assert.equal(Object.prototype.hasOwnProperty.call(body, "reasoning_effort"), false, JSON.stringify(body));
+    assert.deepEqual(body.thinking, { type: reasoning === "off" ? "disabled" : "enabled" });
+    const user = body.messages.find((message) => message.role === "user");
+    assert.ok(user);
+    const image = user.content.find((part) => part.type === "image_url");
+    assert.deepEqual(image, {
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,aGVsbG8=" },
+    });
+  });
+});
+
 test("lists every built-in Pi provider and its model catalog", async () => {
   const client = new BridgeClient();
   const catalog = await client.request("providers", "list_providers");

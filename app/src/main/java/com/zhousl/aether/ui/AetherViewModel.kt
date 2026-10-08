@@ -31,7 +31,10 @@ import com.zhousl.aether.data.PiExtensionInstallKind
 import com.zhousl.aether.data.PiExtensionCatalogEntry
 import com.zhousl.aether.data.PiDiscoveredSkillSource
 import com.zhousl.aether.data.ProviderModelCatalogClient
+import com.zhousl.aether.data.PublicCatalogThinkingResult
+import com.zhousl.aether.data.miMoThinkingLevels
 import com.zhousl.aether.data.thinkingCatalogKey
+import com.zhousl.aether.data.withMiMoThinking
 import com.zhousl.aether.data.LlmProviderConfig
 import com.zhousl.aether.data.LlmTokenUsage
 import com.zhousl.aether.data.ModelCatalogClient
@@ -432,18 +435,20 @@ class AetherViewModel(
             val thinkingCacheKeys = options.mapTo(mutableSetOf()) { option ->
                 thinkingCatalogKey(option.piProviderId, option.modelId)
             }
-            val cachedThinkingLevels = settingsRepository.loadThinkingCatalogCache()
-                .filterKeys(thinkingCacheKeys::contains)
-            val cachedThinkingLevelMaps = settingsRepository.loadThinkingLevelMapsCache()
-                .filterKeys(thinkingCacheKeys::contains)
-            val cachedReasoningModels = settingsRepository.loadReasoningModelsCache()
-                .filterTo(mutableSetOf(), thinkingCacheKeys::contains)
-            if (cachedThinkingLevels.isNotEmpty() && requestKey == lastModelCatalogRequestKey) {
+            val cachedThinking = PublicCatalogThinkingResult(
+                levelsByProviderModel = settingsRepository.loadThinkingCatalogCache()
+                    .filterKeys(thinkingCacheKeys::contains),
+                levelMapsByProviderModel = settingsRepository.loadThinkingLevelMapsCache()
+                    .filterKeys(thinkingCacheKeys::contains),
+                reasoningModels = settingsRepository.loadReasoningModelsCache()
+                    .filterTo(mutableSetOf(), thinkingCacheKeys::contains),
+            ).withMiMoThinking(options)
+            if (cachedThinking.levelsByProviderModel.isNotEmpty() && requestKey == lastModelCatalogRequestKey) {
                 _uiState.update { current ->
                     current.copy(
-                        thinkingLevelsByProviderModel = current.thinkingLevelsByProviderModel + cachedThinkingLevels,
-                        thinkingLevelClampsByProviderModel = current.thinkingLevelClampsByProviderModel + cachedThinkingLevelMaps,
-                        reasoningModels = current.reasoningModels + cachedReasoningModels,
+                        thinkingLevelsByProviderModel = current.thinkingLevelsByProviderModel + cachedThinking.levelsByProviderModel,
+                        thinkingLevelClampsByProviderModel = current.thinkingLevelClampsByProviderModel + cachedThinking.levelMapsByProviderModel,
+                        reasoningModels = current.reasoningModels + cachedThinking.reasoningModels,
                     )
                 }
             }
@@ -2722,8 +2727,11 @@ class AetherViewModel(
             ?: return onResolved(false)
         val cacheKey = thinkingCatalogKey(option.piProviderId, option.modelId)
         current.thinkingLevelsByProviderModel[cacheKey]?.let { levels ->
-            onResolved(levels.isNotEmpty())
-            return
+            val miMoLevels = miMoThinkingLevels(option.piProviderId, option.modelId)
+            if (levels.isNotEmpty() || miMoLevels == null) {
+                onResolved(levels.isNotEmpty())
+                return
+            }
         }
         viewModelScope.launch {
             val catalogResult = ProviderModelCatalogClient.fetchPublicThinkingCatalog(listOf(option))

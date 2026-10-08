@@ -18,9 +18,14 @@ import kotlinx.serialization.json.contentOrNull
 data class ProviderModelCapabilities(
     private val byProviderAndModel: Map<String, Map<String, Boolean>> = emptyMap(),
 ) {
-    /** True unless the catalog explicitly reports a text-only model. */
+    /**
+     * True unless the catalog explicitly reports a text-only model.
+     *
+     * Known MiMo chat ids follow Xiaomi's image table even when the catalog is
+     * missing or stale: V2.6 Flash stays vision-capable, and V2.5 Pro stays text-only.
+     */
     fun supportsImageInput(piProviderId: String?, modelId: String): Boolean =
-        lookup(piProviderId, modelId) ?: true
+        miMoSupportsImageInput(modelId) ?: lookup(piProviderId, modelId) ?: true
 
     /** True when the catalog has an explicit entry for this provider/model pair. */
     fun isReported(piProviderId: String?, modelId: String): Boolean =
