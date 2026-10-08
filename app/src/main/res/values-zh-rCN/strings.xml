@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_mode_accessibility_description">当特权连接读不到 Agent 模式虚拟屏幕时，让 Aether 读取那块屏幕上的控件。只在 Agent 模式操作这块屏幕时使用。</string>
+</resources>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_mode_accessibility_description">Lets Aether read controls on its Agent Mode virtual display when the privileged connection cannot. It is only used while Agent Mode is operating that display.</string>
+</resources>

@@ -1,8 +1,10 @@
 package com.zhousl.aether.agentmode
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
 import android.app.ActivityOptions
 import android.app.PendingIntent
+import android.app.UiAutomation
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -18,6 +20,8 @@ import android.media.Image
 import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.os.SystemClock
@@ -27,6 +31,8 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.annotation.Keep
 import androidx.core.content.getSystemService
 import java.io.OutputStream
@@ -86,6 +92,30 @@ class AetherAgentModeShizukuService @Keep constructor(
     private val previewSurfaces = ConcurrentHashMap<Int, Surface>()
     private val displayLocks = ConcurrentHashMap<Int, Any>()
     private val displaysWithLaunchedContent = ConcurrentHashMap.newKeySet<Int>()
+    private var uiAutomationThread: HandlerThread? = null
+    private var uiAutomation: UiAutomation? = null
+    private var uiAutomationPermanentFailure: String? = null
+    private var treeSessionOrNull: AgentModeUiTreeSession? = null
+
+    private val treeSession: AgentModeUiTreeSession
+        get() = treeSessionOrNull ?: AgentModeUiTreeSession(
+            source = com.zhousl.aether.data.AgentModeSourceUiAutomation,
+            windowsOnDisplay = ::automationWindows,
+            injector = object : AgentModeTreeInjector {
+                override fun tap(displayId: Int, x: Int, y: Int) {
+                    this@AetherAgentModeShizukuService.tap(displayId, x, y)
+                }
+
+                override fun paste(displayId: Int, text: String): String {
+                    pasteText(displayId, text)
+                    return TextInputMethodClipboardPaste
+                }
+
+                override fun focusWindow(displayId: Int): String =
+                    runCatching { JSONObject(focusedWindowJson(displayId)).optString("focused_window") }
+                        .getOrDefault("")
+            },
+        ).also { treeSessionOrNull = it }
 
     override fun createDisplay(
         name: String,
@@ -164,6 +194,7 @@ class AetherAgentModeShizukuService @Keep constructor(
     }
 
     override fun destroy() {
+        disconnectUiAutomation()
         displays.keys.toList().forEach { displayId ->
             runCatching { releaseDisplay(displayId) }
         }
@@ -483,6 +514,11 @@ class AetherAgentModeShizukuService @Keep constructor(
         return Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
     }
 
+    override fun interact(displayId: Int, requestJson: String): String {
+        ensureManagedDisplay(displayId)
+        return treeSession.handle(displayId, requestJson)
+    }
+
     override fun focusedWindowJson(displayId: Int): String {
         ensureManagedDisplay(displayId)
         val process = ProcessBuilder("dumpsys", "input")
@@ -566,6 +602,91 @@ class AetherAgentModeShizukuService @Keep constructor(
             VirtualDisplayFlagTouchFeedbackDisabled or
             VirtualDisplayFlagOwnFocus or
             VirtualDisplayFlagStealTopFocusDisabled
+
+    /**
+     * Shell UiAutomation is constructed against the default display, but [UiAutomation.getWindowsOnAllDisplays]
+     * is not filtered by that display. Null means the connection itself failed.
+     */
+    private fun automationWindows(displayId: Int): List<AccessibilityWindowInfo>? {
+        val automation = uiAutomationOrNull() ?: return null
+        return runCatching {
+            automation.clearCache()
+            automation.windowsOnAllDisplays.get(displayId)?.toList().orEmpty()
+        }.getOrElse {
+            disconnectUiAutomation()
+            null
+        }
+    }
+
+    private fun uiAutomationOrNull(): UiAutomation? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        uiAutomation?.let { return it }
+        if (uiAutomationPermanentFailure != null) return null
+        return runCatching { connectUiAutomation() }
+            .onSuccess { uiAutomation = it }
+            .onFailure { error ->
+                val permanent = error is ClassNotFoundException || error is NoSuchMethodException
+                if (permanent) uiAutomationPermanentFailure = error.message ?: error.javaClass.simpleName
+                uiAutomationThread?.quitSafely()
+                uiAutomationThread = null
+            }
+            .getOrNull()
+    }
+
+    @SuppressLint("PrivateApi")
+    private fun connectUiAutomation(): UiAutomation {
+        val thread = HandlerThread("aether-ui-automation")
+        thread.start()
+        uiAutomationThread = thread
+        val connection = Class.forName("android.app.UiAutomationConnection")
+            .getDeclaredConstructor()
+            .apply { isAccessible = true }
+            .newInstance()
+        val uiClass = Class.forName("android.app.UiAutomation")
+        val constructor = uiClass.declaredConstructors.first { candidate ->
+            candidate.parameterTypes.size == 2 &&
+                Looper::class.java.isAssignableFrom(candidate.parameterTypes[0])
+        }
+        constructor.isAccessible = true
+        val automation = constructor.newInstance(thread.looper, connection) as UiAutomation
+        val connect = uiClass.methods.first { method ->
+            method.name == "connect" &&
+                method.parameterTypes.size == 1 &&
+                method.parameterTypes[0] == Int::class.javaPrimitiveType
+        }
+        connect.isAccessible = true
+        // FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES, so a user-enabled service can stay up as fallback.
+        connect.invoke(automation, 1)
+        automation.setServiceInfo(
+            AccessibilityServiceInfo().apply {
+                eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+                feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                    AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                    AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                notificationTimeout = 50
+            },
+        )
+        runCatching { automation.waitForIdle(200, 1_000) }
+        return automation
+    }
+
+    private fun disconnectUiAutomation() {
+        treeSessionOrNull?.close()
+        treeSessionOrNull = null
+        val automation = uiAutomation
+        uiAutomation = null
+        if (automation != null) {
+            runCatching {
+                val disconnect = automation.javaClass.methods.firstOrNull { method ->
+                    method.name == "disconnect" && method.parameterTypes.isEmpty()
+                }
+                disconnect?.invoke(automation)
+            }
+        }
+        uiAutomationThread?.quitSafely()
+        uiAutomationThread = null
+    }
 
     private fun ensureManagedDisplay(displayId: Int) {
         if (!displays.containsKey(displayId)) {

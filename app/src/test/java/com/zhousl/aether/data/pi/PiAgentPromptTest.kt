@@ -44,4 +44,27 @@ class PiAgentPromptTest {
         assertFalse(disabledInstructions.contains("Chrome Extension tool"))
         assertTrue(enabledInstructions.contains("Chrome Extension tool"))
     }
+
+    @Test
+    fun agentModePromptPrefersCompositeToolsAndOmitsRoutineScreenshots() {
+        val disabled = buildPiAgentInstructions(
+            settings = AppSettings(),
+            workspaceDirectory = "/workspace",
+            runtimeId = LocalRuntimeId.Alpine,
+            agentModeEnabled = false,
+        )
+        val enabled = buildPiAgentInstructions(
+            settings = AppSettings(),
+            workspaceDirectory = "/workspace",
+            runtimeId = LocalRuntimeId.Alpine,
+            agentModeEnabled = true,
+        )
+
+        assertFalse(disabled.contains("find_and_tap"))
+        assertTrue(enabled.contains("find_and_tap"))
+        assertTrue(enabled.contains("find_and_input"))
+        assertTrue(enabled.contains("tap_node"))
+        assertTrue(enabled.contains("include_screenshot"))
+        assertTrue(enabled.contains("same area"))
+    }
 }
