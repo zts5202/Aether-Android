@@ -96,8 +96,19 @@ class AetherToolExecutorTest {
         assertTrue("bbox_norm" in description)
         assertTrue("screenshot_omitted" in description)
         assertFalse("cursor_x/cursor_y" in description)
-        assertTrue("ui_changed_delayed" in description)
+        assertFalse("ui_changed" in description)
         assertFalse("include_image" in description)
+        assertTrue("find_and_tap" in description)
+        assertTrue("include_screenshot" in description)
+        val parameters = (0 until definitions.length())
+            .map { definitions.getJSONObject(it) }
+            .first { it.getString("name") == "agent_display" }
+            .getJSONObject("parameters")
+            .getJSONObject("properties")
+        assertTrue(parameters.getJSONObject("action").getString("description").contains("find_and_input"))
+        assertTrue(parameters.getJSONObject("action").getString("description").contains("tap_node"))
+        assertTrue(parameters.has("include_screenshot"))
+        assertTrue(parameters.has("node_id"))
     }
 
     @Test

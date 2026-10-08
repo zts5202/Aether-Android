@@ -34,9 +34,12 @@ internal fun buildPiAgentInstructions(
     if (agentModeEnabled) {
         append(
             "\n\nAgent Mode is enabled for this chat. Use agent_display only when operating the isolated Android virtual display is required. " +
+                "Prefer find_and_tap, find_and_input, and tap_node over raw coordinates. " +
+                "Do not guess the same area again after a miss; two failures on the same target stop the next attempt. " +
                 "Tap and swipe coordinates use the normalized 0..1000 range on each axis, not screenshot or display pixels: " +
                 "x = pixel_x / image_width * 1000, y = pixel_y / image_height * 1000. " +
-                "Before using text, tap the target field and confirm in the screenshot that it is focused."
+                "Routine taps and typing do not include a screenshot. Pass include_screenshot only when the image is needed, or call action=screenshot. " +
+                "Treat source=ocr as unconfirmed text, not as a control tree."
         )
     }
     if (chromeEnabled) {

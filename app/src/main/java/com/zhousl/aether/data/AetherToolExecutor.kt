@@ -248,15 +248,15 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
     put(
         "description",
         "Operate Aether Agent Mode on an isolated Android virtual display. Use this only when Agent Mode is selected in the chat composer. " +
+            "Prefer find_and_tap, find_and_input, and tap_node. They use the real controls on this display. " +
+            "Do not guess coordinates in the same area again after a miss: two failures on the same query, node id, or nearby point stop the third attempt and nothing is injected. " +
             "tap/swipe coordinates are normalized 0..1000 on each axis, independent of resolution; values above 1000 are rejected. " +
-            "Results report image_width/image_height (screenshot pixels) and cursor_norm_x/cursor_norm_y (last touch point, normalized). " +
-            "screenshot, tap, swipe and tap_text also return elements: offline-OCR text lines currently on screen, " +
-            "each with text and bbox_norm = [left, top, right, bottom] (0..1000, directly reusable as tap/swipe coordinates). " +
-            "When a tap, swipe or tap_text leaves the screen pixel-identical (checked again after a short wait), the screenshot is omitted and the result carries " +
-            "screenshot_omitted=\"unchanged\"; the previous screenshot is still current, and action=screenshot always returns an image. " +
-            "ui_changed_delayed=true means the screen only changed after that wait (e.g. a toggle confirmed by a server). " +
-            "In very long sessions older screenshots and element lists are replaced by placeholders; only the latest few stay in context. " +
-            "Use find_text to inspect matches before an exact tap_text when the target text is uncertain.",
+            "A successful tree read returns nodes (at most 20, serialized to at most 1500 characters). Each node has id, type, text, editable, and center [x, y] in 0..1000. " +
+            "source is ui_automation, accessibility_service, or ocr. ocr means the control tree was unavailable and the lines cannot confirm the action. " +
+            "find_and_input types with the control's set-text action, then clipboard paste. Do not use shell input text. " +
+            "screenshot always attaches an image. tap, swipe, key, text, tap_text, find_and_tap, find_and_input, and tap_node omit the image unless include_screenshot is true; the result then has screenshot_omitted=\"not_requested\". " +
+            "OCR fallback lines use text and bbox_norm = [left, top, right, bottom] in 0..1000. find_text and tap_text remain available. " +
+            "Success is the control action result or a focus/text change. A screenshot difference is not confirmation.",
     )
     put(
         "parameters",
@@ -265,8 +265,10 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
             put(
                 "properties",
                 JSONObject().apply {
-                    put("action", stringProperty("One of: list_apps, start, status, launch, tap, swipe, key, text, screenshot, stop, find_text, tap_text."))
-                    put("query", stringProperty("For list_apps: optional app label, package, or activity filter. For find_text and tap_text: the on-screen text to locate (exact match preferred, then substring)."))
+                    put("action", stringProperty("One of: list_apps, start, status, launch, find_and_tap, find_and_input, tap_node, tap, swipe, key, text, screenshot, stop, find_text, tap_text."))
+                    put("query", stringProperty("For list_apps: optional app label, package, or activity filter. For find_and_tap, find_and_input, find_text, and tap_text: the on-screen text to locate (exact match preferred, then substring)."))
+                    put("node_id", stringProperty("For tap_node: id from the latest nodes list, such as n1."))
+                    put("include_screenshot", booleanProperty("Attach a screenshot for tap, swipe, key, text, tap_text, find_and_tap, find_and_input, or tap_node. Default false. screenshot always attaches an image."))
                     put("include_system", booleanProperty("For list_apps: whether to include system apps."))
                     put("max_results", integerProperty("For list_apps: maximum number of apps to return."))
                     put("target", stringProperty("For launch: package name or exact app label."))
@@ -286,8 +288,8 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
                     put(
                         "text",
                         stringProperty(
-                            "For text: text to insert into the focused field; any Unicode (Chinese, emoji, ...) is supported. " +
-                                "Tap the field first and confirm it is focused. Fails if no window on the display has input focus.",
+                            "For text and find_and_input: text to insert, including Chinese. " +
+                                "Prefer find_and_input, which uses the control's set-text action and falls back to clipboard paste.",
                         ),
                     )
                 },

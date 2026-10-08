@@ -745,7 +745,9 @@ private fun hostToolPayload(
             if (toolName == "agent_display" || toolName == "chrome" || toolName == "browser") {
                 val parsed = runCatching { JSONObject(rawOutput) }.getOrNull()
                 val imageData = parsed?.optString("screenshot_base64").orEmpty()
-                if (parsed?.optBoolean("ok") == true && imageData.isNotBlank()) {
+                if (parsed != null && imageData.isNotBlank() &&
+                    (toolName == "agent_display" || parsed.optBoolean("ok"))
+                ) {
                     put(
                         JSONObject().apply {
                             put("type", "image")

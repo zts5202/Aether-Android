@@ -17,6 +17,7 @@ import android.view.Display
 import android.view.Surface
 import androidx.core.content.getSystemService
 import com.rosan.app_process.AppProcess
+import com.zhousl.aether.agentmode.AetherAgentModeAccessibilityService
 import com.zhousl.aether.agentmode.AetherAgentModeShizukuService
 import com.zhousl.aether.agentmode.IAetherAgentModeService
 import com.zhousl.aether.termux.TermuxBashTool
@@ -49,13 +50,9 @@ private const val AgentModeCaptureMimeType = "image/jpeg"
 private const val AgentModeCaptureMaxEdge = 1280
 private const val AgentModeCoordinateSpace = "normalized_0_1000"
 private const val AgentModeCaptureJpegQuality = 85
-// ui_changed fingerprinting: compare an area-averaged grayscale grid of the display before/after a
-// gesture. Cells are ~18x20 px on a 588x1280 capture, so a toggle switch spans several of them.
+// Exact frame comparison for the optional unchanged-screenshot omission. It is not a success signal.
 private const val AgentModeUiChangeGridColumns = 32
 private const val AgentModeUiChangeGridRows = 64
-private const val AgentModeUiChangeSettleMillis = 400L
-// A local change counts once any single cell moves by more than this many gray levels.
-private const val AgentModeUiChangeCellTolerance = 4
 private const val AgentModeUnchangedRecheckMillis = 1_000L
 // tap_text search: when the query is not on screen, scroll the content up and look again.
 private const val AgentModeTextSearchMaxScrolls = 2
@@ -67,7 +64,7 @@ private const val ShizukuPermissionRequestCode = 4201
 private const val RootAuthorizationProbeTimeoutMillis = 2_000L
 private const val ShizukuUserServiceBindTimeoutMillis = 20_000L
 private const val ShizukuUserServiceTag = "aether-agent-mode"
-private const val ShizukuUserServiceVersion = 2
+private const val ShizukuUserServiceVersion = 3
 
 private val ShizukuManagerPackages = listOf(
     "moe.shizuku.privileged.api",
@@ -194,6 +191,10 @@ class AgentModeController(
     private var rootProcess: AppProcess.Terminal? = null
     @Volatile
     private var previewSurface: Surface? = null
+    private val failureGuard = AgentModeFailureGuard()
+    private var lastModelNodes: List<AgentModeNode> = emptyList()
+    private var lastSnapshotId: String = ""
+    private var lastSource: String = ""
 
     val displayState: StateFlow<AgentModeDisplayState> = _displayState.asStateFlow()
     val authorizationState: StateFlow<AgentModeAuthorizationState> = _authorizationState.asStateFlow()
@@ -274,112 +275,14 @@ class AgentModeController(
                     )
                 }
             }
-            "tap" -> {
-                val displayId = ensureDisplay(settings)
-                when (val point = resolvePoint(arguments, "x", "y")) {
-                    is ResolvedPoint.Invalid -> invalidArguments(point.message)
-                    is ResolvedPoint.Valid -> {
-                        val beforeFrame = captureUiFingerprint(settings)
-                        requireAgentModeService(settings).tap(displayId, point.x, point.y)
-                        updateCursorPosition(point.x, point.y, animationDurationMillis = 180)
-                        delay(AgentModeUiChangeSettleMillis)
-                        val afterFrame = captureUiFingerprint(settings)
-                        captureAfterDelay(
-                            settings,
-                            workspaceDirectory,
-                            termuxWorkspaceDirectory,
-                            delayMillis = 350,
-                            extras = focusExtras(settings, displayId)
-                                .withUiChanged(beforeFrame, afterFrame, action = "tap"),
-                            includeElements = true,
-                            unchangedFrom = beforeFrame,
-                        )
-                    }
-                }
-            }
-            "swipe" -> {
-                val displayId = ensureDisplay(settings)
-                val start = resolvePoint(arguments, "x1", "y1")
-                val end = resolvePoint(arguments, "x2", "y2")
-                val durationMs = arguments.optInt("duration_ms", arguments.optInt("durationMs", 500))
-                    .coerceIn(50, 10_000)
-                when {
-                    start is ResolvedPoint.Invalid -> invalidArguments(start.message)
-                    end is ResolvedPoint.Invalid -> invalidArguments(end.message)
-                    start is ResolvedPoint.Valid && end is ResolvedPoint.Valid -> {
-                        updateCursorPosition(start.x, start.y, animationDurationMillis = 80)
-                        controllerScope.launch {
-                            delay(40)
-                            updateCursorPosition(end.x, end.y, animationDurationMillis = durationMs)
-                        }
-                        val beforeFrame = captureUiFingerprint(settings)
-                        requireAgentModeService(settings).swipe(displayId, start.x, start.y, end.x, end.y, durationMs)
-                        delay(AgentModeUiChangeSettleMillis)
-                        val afterFrame = captureUiFingerprint(settings)
-                        captureAfterDelay(
-                            settings,
-                            workspaceDirectory,
-                            termuxWorkspaceDirectory,
-                            delayMillis = durationMs.toLong() + 250,
-                            extras = JSONObject().withUiChanged(beforeFrame, afterFrame, action = "swipe"),
-                            includeElements = true,
-                            unchangedFrom = beforeFrame,
-                        )
-                    }
-                    else -> invalidArguments("x1, y1, x2, and y2 are required.")
-                }
-            }
-            "key" -> {
-                val displayId = ensureDisplay(settings)
-                val keyCode = arguments.optString("key").trim()
-                if (keyCode.isBlank()) {
-                    invalidArguments("Missing required 'key' argument.")
-                } else {
-                    requireAgentModeService(settings).key(displayId, keyCode)
-                    captureAfterDelay(
-                        settings,
-                        workspaceDirectory,
-                        termuxWorkspaceDirectory,
-                        delayMillis = 300,
-                    )
-                }
-            }
-            "text" -> {
-                val displayId = ensureDisplay(settings)
-                val text = arguments.optString("text")
-                if (text.isBlank()) {
-                    invalidArguments("Missing required 'text' argument.")
-                } else {
-                    val focus = focusExtras(settings, displayId)
-                    // Only refuse when the focus state was actually read and is empty; unknown focus falls through.
-                    if (focus.has("focused_window") && focus.optString("focused_window").isBlank()) {
-                        toolError(
-                            message = "No window on Agent Mode display $displayId has input focus, so the text would be dropped. " +
-                                "Tap the text field first, then check the screenshot for a cursor or focused field.",
-                            action = action,
-                        )
-                    } else {
-                        val method = requireAgentModeService(settings).text(displayId, text)
-                        captureAfterDelay(
-                            settings,
-                            workspaceDirectory,
-                            termuxWorkspaceDirectory,
-                            delayMillis = 350,
-                            extras = focus.put("text_input_method", method.orEmpty()),
-                        )
-                    }
-                }
-            }
-            "screenshot" -> {
-                ensureDisplay(settings)
-                captureAfterDelay(
-                    settings,
-                    workspaceDirectory,
-                    termuxWorkspaceDirectory,
-                    delayMillis = 0,
-                    includeElements = true,
-                )
-            }
+            "tap" -> gestureTap(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
+            "swipe" -> gestureSwipe(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
+            "key" -> gestureKey(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
+            "text" -> gestureText(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
+            "screenshot" -> gestureScreenshot(settings, workspaceDirectory, termuxWorkspaceDirectory)
+            "find_and_tap" -> gestureFindAndTap(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
+            "find_and_input" -> gestureFindAndInput(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
+            "tap_node" -> gestureTapNode(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
             "find_text" -> {
                 ensureDisplay(settings)
                 val query = arguments.optString("query").trim()
@@ -389,15 +292,7 @@ class AgentModeController(
                     findTextResult(settings, query)
                 }
             }
-            "tap_text" -> {
-                val displayId = ensureDisplay(settings)
-                val query = arguments.optString("query").trim()
-                if (query.isBlank()) {
-                    invalidArguments("Missing required 'query' argument for tap_text.")
-                } else {
-                    tapTextResult(settings, workspaceDirectory, termuxWorkspaceDirectory, displayId, query)
-                }
-            }
+            "tap_text" -> gestureTapText(settings, workspaceDirectory, termuxWorkspaceDirectory, arguments)
             "stop" -> {
                 releaseDisplay()
                 JSONObject().apply {
@@ -784,6 +679,664 @@ class AgentModeController(
         }
     }
 
+    private suspend fun gestureTap(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val point = resolvePoint(arguments, "x", "y")
+        if (point is ResolvedPoint.Invalid) return invalidArguments(point.message)
+        point as ResolvedPoint.Valid
+        val state = _displayState.value
+        val normX = normalizeAgentModePixel(point.x, state.width)
+        val normY = normalizeAgentModePixel(point.y, state.height)
+        blockedResult("tap", normalizedX = normX, normalizedY = normY)?.let { return it }
+        val tree = invokeTree(
+            settings,
+            displayId,
+            JSONObject().put("op", "click_at").put("x", point.x).put("y", point.y),
+        )
+        val body = if (!tree.optBoolean("available")) {
+            requireAgentModeService(settings).tap(displayId, point.x, point.y)
+            updateCursorPosition(point.x, point.y, animationDurationMillis = 180)
+            JSONObject()
+                .put("ok", true)
+                .put("confirmed", false)
+                .put("action", "tap")
+                .put("source", AgentModeSourceOcr)
+                .put("reason", AgentModeReasonInjectedUnconfirmed)
+                .put("confirmation", "无法确认")
+                .put("errmsg", "No control tree. The coordinate tap was injected, but it cannot be confirmed.")
+        } else {
+            tree.put("action", "tap")
+            rememberCursor(tree, point.x, point.y)
+            tree
+        }
+        failureGuard.record(
+            success = body.optBoolean("confirmed"),
+            normalizedX = normX,
+            normalizedY = normY,
+        )
+        rememberNodes(body)
+        if (!body.optBoolean("confirmed")) attachNearby(body, normX, normY)
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            body,
+            attachScreenshot = agentModeAttachesScreenshot("tap", agentModeWantsScreenshot(arguments)),
+            includeOcr = !tree.optBoolean("available"),
+        )
+    }
+
+    private suspend fun gestureSwipe(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val start = resolvePoint(arguments, "x1", "y1")
+        val end = resolvePoint(arguments, "x2", "y2")
+        val durationMs = arguments.optInt("duration_ms", arguments.optInt("durationMs", 500))
+            .coerceIn(50, 10_000)
+        when {
+            start is ResolvedPoint.Invalid -> return invalidArguments(start.message)
+            end is ResolvedPoint.Invalid -> return invalidArguments(end.message)
+            start !is ResolvedPoint.Valid || end !is ResolvedPoint.Valid ->
+                return invalidArguments("x1, y1, x2, and y2 are required.")
+        }
+        updateCursorPosition(start.x, start.y, animationDurationMillis = 80)
+        controllerScope.launch {
+            delay(40)
+            updateCursorPosition(end.x, end.y, animationDurationMillis = durationMs)
+        }
+        requireAgentModeService(settings).swipe(
+            displayId,
+            start.x,
+            start.y,
+            end.x,
+            end.y,
+            durationMs,
+        )
+        val attach = agentModeAttachesScreenshot("swipe", agentModeWantsScreenshot(arguments))
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            JSONObject()
+                .put("ok", true)
+                .put("confirmed", true)
+                .put("action", "swipe")
+                .put("reason", "injected")
+                .put("stdout", "Swipe injected on the Agent Mode display."),
+            attachScreenshot = attach,
+            includeOcr = false,
+            delayMillis = if (attach) durationMs.toLong() + 250 else 0,
+        )
+    }
+
+    private suspend fun gestureKey(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val keyCode = arguments.optString("key").trim()
+        if (keyCode.isBlank()) return invalidArguments("Missing required 'key' argument.")
+        requireAgentModeService(settings).key(displayId, keyCode)
+        val attach = agentModeAttachesScreenshot("key", agentModeWantsScreenshot(arguments))
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            JSONObject()
+                .put("ok", true)
+                .put("confirmed", true)
+                .put("action", "key")
+                .put("reason", "injected")
+                .put("key", keyCode)
+                .put("stdout", "Key $keyCode injected on the Agent Mode display."),
+            attachScreenshot = attach,
+            includeOcr = false,
+        )
+    }
+
+    private suspend fun gestureText(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val text = arguments.optString("text")
+        if (text.isEmpty()) return invalidArguments("Missing required 'text' argument.")
+        val tree = invokeTree(
+            settings,
+            displayId,
+            JSONObject().put("op", "set_text").put("text", text),
+        )
+        val attach = agentModeAttachesScreenshot("text", agentModeWantsScreenshot(arguments))
+        val body = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
+            legacyTextBody(settings, displayId, text, tree)
+        } else {
+            tree.put("action", "text")
+            if (!tree.optBoolean("confirmed") && tree.optString("text_input_method").isNotBlank()) {
+                tree.put("ok", true)
+                tree.put("reason", AgentModeReasonInjectedUnconfirmed)
+            }
+            tree
+        }
+        rememberNodes(body)
+        if (!body.optBoolean("confirmed")) attachNearby(body, null, null)
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            body,
+            attachScreenshot = attach,
+            includeOcr = body.optString("source") == AgentModeSourceOcr,
+        )
+    }
+
+    private suspend fun legacyTextBody(
+        settings: AppSettings,
+        displayId: Int,
+        text: String,
+        tree: JSONObject,
+    ): JSONObject {
+        val focus = focusExtras(settings, displayId)
+        if (focus.has("focused_window") && focus.optString("focused_window").isBlank()) {
+            return focus
+                .put("ok", false)
+                .put("confirmed", false)
+                .put("action", "text")
+                .put("source", tree.optString("source").ifBlank { AgentModeSourceOcr })
+                .put("reason", AgentModeReasonNotConfirmed)
+                .put("confirmation", "无法确认")
+                .put(
+                    "errmsg",
+                    "No window on Agent Mode display $displayId has input focus, so the text was not sent. " +
+                        "Use find_and_input on the field, or tap it and retry.",
+                )
+        }
+        val method = requireAgentModeService(settings).text(displayId, text)
+        return focus
+            .put("ok", true)
+            .put("confirmed", false)
+            .put("action", "text")
+            .put("source", tree.optString("source").ifBlank { AgentModeSourceOcr })
+            .put("reason", AgentModeReasonInjectedUnconfirmed)
+            .put("text_input_method", method.orEmpty())
+            .put("confirmation", "无法确认")
+            .put("nodes", tree.opt("nodes") ?: JSONArray())
+            .put("stdout", "Text was sent without a confirmed editable control.")
+    }
+
+    private suspend fun gestureScreenshot(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val tree = invokeTree(settings, displayId, JSONObject().put("op", "dump"))
+        if (tree.optBoolean("available")) {
+            rememberNodes(tree)
+            tree.put("ok", true)
+            tree.put("action", "screenshot")
+            tree.put("stdout", "Captured the control tree and a screenshot.")
+            return deliver(
+                settings,
+                workspaceDirectory,
+                termuxWorkspaceDirectory,
+                tree,
+                attachScreenshot = true,
+                includeOcr = false,
+            )
+        }
+        return captureAfterDelay(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            delayMillis = 0,
+            extras = JSONObject()
+                .put("ok", true)
+                .put("action", "screenshot")
+                .put("source", AgentModeSourceOcr)
+                .put("reason", AgentModeReasonNoTree)
+                .put("confirmation", "无法确认")
+                .put("stdout", "No control tree. The screenshot includes OCR lines only."),
+            includeElements = true,
+            attachScreenshot = true,
+        )
+    }
+
+    private suspend fun gestureFindAndTap(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val query = arguments.optString("query").trim()
+        if (query.isBlank()) return invalidArguments("Missing required 'query' argument for find_and_tap.")
+        blockedResult("find_and_tap", query = query)?.let { return it }
+        val tree = invokeTree(
+            settings,
+            displayId,
+            JSONObject().put("op", "find_and_tap").put("query", query),
+        )
+        val attach = agentModeAttachesScreenshot("find_and_tap", agentModeWantsScreenshot(arguments))
+        if (!tree.optBoolean("available")) {
+            return tapTextResult(
+                settings,
+                workspaceDirectory,
+                termuxWorkspaceDirectory,
+                displayId,
+                query,
+                attachScreenshot = attach,
+            )
+        }
+        tree.put("action", "find_and_tap")
+        rememberNodes(tree)
+        rememberCursor(tree, fallbackX = null, fallbackY = null)
+        val confirmed = tree.optBoolean("confirmed")
+        failureGuard.record(success = confirmed, query = query)
+        if (!confirmed) attachNearby(tree, null, null)
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            tree,
+            attachScreenshot = attach,
+            includeOcr = false,
+        )
+    }
+
+    private suspend fun gestureFindAndInput(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val text = arguments.optString("text")
+        if (text.isEmpty()) return invalidArguments("Missing required 'text' argument for find_and_input.")
+        val query = arguments.optString("query").trim()
+        val point = optionalPoint(arguments)
+        if (point is ResolvedPoint.Invalid) return invalidArguments(point.message)
+        val state = _displayState.value
+        val validPoint = point as? ResolvedPoint.Valid
+        val normX = validPoint?.let { normalizeAgentModePixel(it.x, state.width) }
+        val normY = validPoint?.let { normalizeAgentModePixel(it.y, state.height) }
+        val guardQuery = query.ifBlank { text }
+        blockedResult(
+            "find_and_input",
+            query = guardQuery,
+            normalizedX = normX,
+            normalizedY = normY,
+        )?.let { return it }
+        val tree = invokeTree(
+            settings,
+            displayId,
+            JSONObject()
+                .put("op", "find_and_input")
+                .put("text", text)
+                .put("query", query),
+        )
+        val attach = agentModeAttachesScreenshot("find_and_input", agentModeWantsScreenshot(arguments))
+        val body = if (!tree.optBoolean("available")) {
+            if (validPoint == null) {
+                failureGuard.record(success = false, query = guardQuery)
+                JSONObject()
+                    .put("ok", false)
+                    .put("confirmed", false)
+                    .put("action", "find_and_input")
+                    .put("source", AgentModeSourceOcr)
+                    .put("reason", AgentModeReasonNoTree)
+                    .put("confirmation", "无法确认")
+                    .put("errmsg", "No control tree and no coordinates, so nothing was tapped or typed.")
+            } else {
+                requireAgentModeService(settings).tap(displayId, validPoint.x, validPoint.y)
+                updateCursorPosition(validPoint.x, validPoint.y, animationDurationMillis = 180)
+                delay(200)
+                val method = requireAgentModeService(settings).text(displayId, text)
+                failureGuard.record(
+                    success = false,
+                    query = guardQuery,
+                    normalizedX = normX,
+                    normalizedY = normY,
+                )
+                JSONObject()
+                    .put("ok", false)
+                    .put("confirmed", false)
+                    .put("action", "find_and_input")
+                    .put("source", AgentModeSourceOcr)
+                    .put("reason", AgentModeReasonOcrUnconfirmed)
+                    .put("text_input_method", method)
+                    .put("confirmation", "无法确认")
+                    .put("errmsg", "No control tree. Tapped the given point and pasted, but the result cannot be confirmed.")
+            }
+        } else {
+            tree.put("action", "find_and_input")
+            rememberCursor(tree, fallbackX = validPoint?.x, fallbackY = validPoint?.y)
+            val confirmed = tree.optBoolean("confirmed")
+            failureGuard.record(
+                success = confirmed,
+                query = guardQuery,
+                normalizedX = normX,
+                normalizedY = normY,
+            )
+            if (!confirmed) attachNearby(tree, normX, normY)
+            tree
+        }
+        rememberNodes(body)
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            body,
+            attachScreenshot = attach,
+            includeOcr = body.optString("source") == AgentModeSourceOcr,
+        )
+    }
+
+    private suspend fun gestureTapNode(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val nodeId = arguments.optString("node_id").ifBlank { arguments.optString("nodeId") }.trim()
+        if (nodeId.isBlank()) return invalidArguments("Missing required 'node_id' argument for tap_node.")
+        blockedResult("tap_node", nodeId = nodeId)?.let { return it }
+        val tree = invokeTree(
+            settings,
+            displayId,
+            JSONObject()
+                .put("op", "tap_node")
+                .put("node_id", nodeId)
+                .put("snapshot_id", lastSnapshotId),
+        )
+        val attach = agentModeAttachesScreenshot("tap_node", agentModeWantsScreenshot(arguments))
+        if (!tree.optBoolean("available")) {
+            failureGuard.record(success = false, nodeId = nodeId)
+            return deliver(
+                settings,
+                workspaceDirectory,
+                termuxWorkspaceDirectory,
+                JSONObject()
+                    .put("ok", false)
+                    .put("confirmed", false)
+                    .put("action", "tap_node")
+                    .put("source", AgentModeSourceOcr)
+                    .put("reason", AgentModeReasonNoTree)
+                    .put("node_id", nodeId)
+                    .put("confirmation", "无法确认")
+                    .put("errmsg", "No control tree, so node '$nodeId' was not tapped."),
+                attachScreenshot = attach,
+                includeOcr = true,
+            )
+        }
+        tree.put("action", "tap_node")
+        rememberNodes(tree)
+        rememberCursor(tree, fallbackX = null, fallbackY = null)
+        failureGuard.record(success = tree.optBoolean("confirmed"), nodeId = nodeId)
+        if (!tree.optBoolean("confirmed")) attachNearby(tree, null, null)
+        return deliver(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            tree,
+            attachScreenshot = attach,
+            includeOcr = false,
+        )
+    }
+
+    private suspend fun gestureTapText(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        arguments: JSONObject,
+    ): String {
+        val displayId = ensureDisplay(settings)
+        val query = arguments.optString("query").trim()
+        if (query.isBlank()) return invalidArguments("Missing required 'query' argument for tap_text.")
+        blockedResult("tap_text", query = query)?.let { return it }
+        return tapTextResult(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            displayId,
+            query,
+            attachScreenshot = agentModeAttachesScreenshot("tap_text", agentModeWantsScreenshot(arguments)),
+        )
+    }
+
+    private suspend fun invokeTree(
+        settings: AppSettings,
+        displayId: Int,
+        request: JSONObject,
+    ): JSONObject {
+        val state = _displayState.value
+        if (!request.has("width")) request.put("width", state.width.coerceAtLeast(1))
+        if (!request.has("height")) request.put("height", state.height.coerceAtLeast(1))
+        val payload = request.toString()
+        val privileged = runCatching {
+            JSONObject(requireAgentModeService(settings).interact(displayId, payload))
+        }.getOrNull()
+        if (privileged != null && privileged.optBoolean("available")) {
+            finishPending(settings, displayId, privileged)
+            return privileged
+        }
+        val fallback = runCatching {
+            AetherAgentModeAccessibilityService.interact(displayId, payload)?.let(::JSONObject)
+        }.getOrNull()
+        if (
+            fallback != null &&
+            fallback.optBoolean("available") &&
+            fallback.optString("reason") != AgentModeReasonDisplayNotInTree
+        ) {
+            finishPending(settings, displayId, fallback)
+            return fallback
+        }
+        return JSONObject()
+            .put("available", false)
+            .put("use_ocr", true)
+            .put("ok", false)
+            .put("confirmed", false)
+            .put("source", AgentModeSourceOcr)
+            .put("reason", AgentModeReasonNoTree)
+            .put(
+                "errmsg",
+                privileged?.optString("errmsg").orEmpty().ifBlank {
+                    fallback?.optString("errmsg").orEmpty()
+                }.ifBlank { "No control tree is available for this display." },
+            )
+    }
+
+    private suspend fun finishPending(
+        settings: AppSettings,
+        displayId: Int,
+        body: JSONObject,
+    ) {
+        val service = requireAgentModeService(settings)
+        if (body.has("pending_tap_x")) {
+            val x = body.optInt("pending_tap_x")
+            val y = body.optInt("pending_tap_y")
+            val before = focusWindowLabel(settings, displayId)
+            service.tap(displayId, x, y)
+            updateCursorPosition(x, y, animationDurationMillis = 180)
+            delay(200)
+            val after = focusWindowLabel(settings, displayId)
+            val changed = before.isNotBlank() && after.isNotBlank() && before != after
+            body.put("ok", changed)
+            body.put("confirmed", changed)
+            body.put("reason", if (changed) AgentModeReasonFocusChanged else AgentModeReasonNotConfirmed)
+            body.remove("pending_tap_x")
+            body.remove("pending_tap_y")
+        }
+        if (body.has("pending_paste")) {
+            val text = body.optString("pending_paste")
+            val method = service.text(displayId, text)
+            body.put("text_input_method", method)
+            body.remove("pending_paste")
+            delay(200)
+            val confirmed = textAppearsInTree(displayId, text)
+            body.put("ok", confirmed)
+            body.put("confirmed", confirmed)
+            body.put("reason", if (confirmed) AgentModeReasonClipboardPaste else AgentModeReasonNotConfirmed)
+        }
+    }
+
+    private suspend fun textAppearsInTree(displayId: Int, text: String): Boolean {
+        if (text.isEmpty()) return false
+        val state = _displayState.value
+        val follow = runCatching {
+            AetherAgentModeAccessibilityService.interact(
+                displayId,
+                JSONObject()
+                    .put("op", "dump")
+                    .put("query", text.take(32))
+                    .put("width", state.width.coerceAtLeast(1))
+                    .put("height", state.height.coerceAtLeast(1))
+                    .toString(),
+            )?.let(::JSONObject)
+        }.getOrNull() ?: return false
+        if (!follow.optBoolean("available")) return false
+        rememberNodes(follow)
+        val nodes = follow.optJSONArray("nodes") ?: return false
+        return (0 until nodes.length()).any { index ->
+            nodes.optJSONObject(index)?.optString("text")?.contains(text) == true
+        }
+    }
+
+    private suspend fun focusWindowLabel(settings: AppSettings, displayId: Int): String =
+        focusExtras(settings, displayId).optString("focused_window")
+
+    private fun rememberNodes(body: JSONObject) {
+        val nodes = parseAgentModeNodes(body.optJSONArray("nodes"))
+        if (nodes.isNotEmpty()) lastModelNodes = nodes
+        val snapshot = body.optString("snapshot_id")
+        if (snapshot.isNotBlank()) lastSnapshotId = snapshot
+        val source = body.optString("source")
+        if (source.isNotBlank()) lastSource = source
+    }
+
+    private fun rememberCursor(body: JSONObject, fallbackX: Int?, fallbackY: Int?) {
+        val x = if (body.has("tap_x")) body.optInt("tap_x") else fallbackX
+        val y = if (body.has("tap_y")) body.optInt("tap_y") else fallbackY
+        if (x != null && y != null) updateCursorPosition(x, y, animationDurationMillis = 180)
+    }
+
+    private fun attachNearby(body: JSONObject, normalizedX: Int?, normalizedY: Int?) {
+        if (body.has("nearby")) return
+        val nodes = parseAgentModeNodes(body.optJSONArray("nodes")).ifEmpty { lastModelNodes }
+        if (nodes.isEmpty()) {
+            body.put("confirmation", "无法确认")
+            return
+        }
+        body.put("nearby", agentModeNodesJson(agentModeNearbyNodes(nodes, normalizedX, normalizedY)))
+    }
+
+    private fun blockedResult(
+        action: String,
+        query: String? = null,
+        nodeId: String? = null,
+        normalizedX: Int? = null,
+        normalizedY: Int? = null,
+    ): String? {
+        if (!failureGuard.shouldBlock(query, nodeId, normalizedX, normalizedY)) return null
+        return JSONObject().apply {
+            put("ok", false)
+            put("confirmed", false)
+            put("action", action)
+            put("reason", AgentModeReasonRepeatedFailure)
+            put("errmsg", "Stopped after two failures on the same target. Nothing was injected.")
+            put("stdout", "Stopped after two failures on the same target. Nothing was injected.")
+            put("screenshot_omitted", "not_requested")
+            if (lastModelNodes.isNotEmpty()) {
+                if (lastSource.isNotBlank()) put("source", lastSource)
+                put("nearby", agentModeNodesJson(agentModeNearbyNodes(lastModelNodes, normalizedX, normalizedY)))
+            } else {
+                put("source", AgentModeSourceOcr)
+                put("confirmation", "无法确认")
+            }
+        }.toString()
+    }
+
+    private suspend fun deliver(
+        settings: AppSettings,
+        workspaceDirectory: String,
+        termuxWorkspaceDirectory: String,
+        body: JSONObject,
+        attachScreenshot: Boolean,
+        includeOcr: Boolean,
+        delayMillis: Long = 0,
+    ): String {
+        if (body.optString("stdout").isBlank()) body.put("stdout", outcomeMessage(body))
+        if (!attachScreenshot && !includeOcr) {
+            val state = _displayState.value
+            state.displayId?.let { body.put("display_id", it) }
+            if (!body.has("width")) body.put("width", state.width)
+            if (!body.has("height")) body.put("height", state.height)
+            val (imageWidth, imageHeight) = agentModeScreenshotSize(
+                state.width,
+                state.height,
+                AgentModeCaptureMaxEdge,
+            )
+            body.put("image_width", imageWidth)
+            body.put("image_height", imageHeight)
+            body.put("coordinate_space", AgentModeCoordinateSpace)
+            body.put("screenshot_omitted", "not_requested")
+            state.cursorX?.let {
+                body.put("cursor_x", it)
+                body.put("cursor_norm_x", normalizeAgentModePixel(it, state.width))
+            }
+            state.cursorY?.let {
+                body.put("cursor_y", it)
+                body.put("cursor_norm_y", normalizeAgentModePixel(it, state.height))
+            }
+            return body.toString()
+        }
+        return captureAfterDelay(
+            settings,
+            workspaceDirectory,
+            termuxWorkspaceDirectory,
+            delayMillis = delayMillis,
+            extras = body,
+            includeElements = includeOcr,
+            attachScreenshot = attachScreenshot,
+        )
+    }
+
+    private fun outcomeMessage(body: JSONObject): String {
+        val reason = body.optString("reason")
+        val detail = body.optString("errmsg")
+        val status = when {
+            body.optBoolean("confirmed") -> "Confirmed"
+            body.optBoolean("ok") -> "Completed, not confirmed"
+            else -> "Failed"
+        }
+        return buildString {
+            append(status)
+            if (reason.isNotBlank()) append(" (").append(reason).append(')')
+            if (detail.isNotBlank()) append(": ").append(detail)
+            append('.')
+        }
+    }
+
+    private fun optionalPoint(arguments: JSONObject): ResolvedPoint? {
+        val hasX = arguments.has("x") && !arguments.isNull("x")
+        val hasY = arguments.has("y") && !arguments.isNull("y")
+        if (!hasX && !hasY) return null
+        return resolvePoint(arguments, "x", "y")
+    }
+
     private suspend fun captureAfterDelay(
         settings: AppSettings,
         workspaceDirectory: String,
@@ -792,6 +1345,7 @@ class AgentModeController(
         extras: JSONObject? = null,
         includeElements: Boolean = false,
         unchangedFrom: IntArray? = null,
+        attachScreenshot: Boolean = true,
     ): String {
         if (delayMillis > 0) delay(delayMillis)
         val captureId = "capture-${System.currentTimeMillis()}"
@@ -800,16 +1354,15 @@ class AgentModeController(
         // Token saver: when the gesture left the screen pixel-for-pixel identical to the frame taken
         // before it, the image adds nothing the model has not already seen, so it is not attached.
         // The comparison is exact (not thresholded) so a small change is never mistaken for "same".
-        var screenUnchanged = unchangedFrom != null &&
+        var screenUnchanged = attachScreenshot &&
+            unchangedFrom != null &&
             fingerprintJpegBytes(bytes)?.let { isIdenticalFrame(unchangedFrom, it) } == true
         // Some apps only redraw after a server round trip (e.g. Bilibili's notification toggles),
         // so an "unchanged" verdict is confirmed once more before the model is told the tap missed.
-        var changedAfterRecheck = false
         if (screenUnchanged && unchangedFrom != null) {
             delay(AgentModeUnchangedRecheckMillis)
             bytes = captureBytes(settings, previewFile)
             screenUnchanged = fingerprintJpegBytes(bytes)?.let { isIdenticalFrame(unchangedFrom, it) } == true
-            changedAfterRecheck = !screenUnchanged
         }
         val latestPreviewFile = File(cacheDirectory, "latest.$AgentModeCaptureExtension")
         previewFile.copyTo(latestPreviewFile, overwrite = true)
@@ -859,22 +1412,25 @@ class AgentModeController(
                 put("cursor_norm_y", normalizeAgentModePixel(it, state.height))
             }
             extras?.keys()?.forEach { key -> put(key, extras.get(key)) }
-            if (changedAfterRecheck) {
-                put("ui_changed", true)
-                put("ui_changed_delayed", true)
-            }
-            if (screenUnchanged) {
+            if (includeElements && !has("source")) put("source", AgentModeSourceOcr)
+            val callerStdout = extras?.optString("stdout").orEmpty()
+            if (!attachScreenshot) {
+                put("screenshot_omitted", "not_requested")
+                put("stdout", callerStdout.ifBlank { outcomeMessage(this) })
+            } else if (screenUnchanged) {
                 put("screenshot_omitted", "unchanged")
                 put(
                     "stdout",
-                    "The screen is pixel-identical to before the gesture, even after waiting " +
-                        "${AgentModeUnchangedRecheckMillis}ms, so no screenshot is attached. " +
-                        "Call action=screenshot if you need the image again.",
+                    callerStdout.ifBlank {
+                        "The screen is pixel-identical to before the gesture, even after waiting " +
+                            "${AgentModeUnchangedRecheckMillis}ms, so no screenshot is attached. " +
+                            "Call action=screenshot if you need the image again."
+                    },
                 )
             } else {
                 put("screenshot_mime_type", AgentModeCaptureMimeType)
                 put("screenshot_base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
-                put("stdout", "Captured Agent Mode screenshot: $workspacePath")
+                put("stdout", callerStdout.ifBlank { "Captured Agent Mode screenshot: $workspacePath" })
             }
         }.toString()
     }
@@ -930,28 +1486,6 @@ class AgentModeController(
         }
     }
 
-    /**
-     * Captures the display into a small grayscale grid so a gesture can report whether it actually
-     * changed the UI. Returns null when the frame could not be captured or decoded.
-     */
-    private suspend fun captureUiFingerprint(settings: AppSettings): IntArray? = runCatching {
-        val file = File(
-            cacheDirectory,
-            "ui-fingerprint-${System.currentTimeMillis()}.$AgentModeCaptureExtension",
-        )
-        try {
-            captureImageFile(settings, file)
-            val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return@runCatching null
-            try {
-                downscaleToGrayGrid(bitmap)
-            } finally {
-                bitmap.recycle()
-            }
-        } finally {
-            runCatching { file.delete() }
-        }
-    }.getOrNull()
-
     /** Fingerprints an already-captured JPEG; null when it cannot be decoded. */
     private fun fingerprintJpegBytes(bytes: ByteArray): IntArray? = runCatching {
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching null
@@ -975,35 +1509,6 @@ class AgentModeController(
             AgentModeUiChangeGridColumns,
             AgentModeUiChangeGridRows,
         )
-    }
-
-    /**
-     * Adds `ui_changed` when both frames were captured. The field is omitted when the comparison
-     * could not run, so a caller never reads a fabricated "unchanged".
-     */
-    private fun JSONObject.withUiChanged(
-        before: IntArray?,
-        after: IntArray?,
-        action: String,
-    ): JSONObject = apply {
-        if (before != null && after != null && before.size == after.size) {
-            val changedCells = changedGridCellCount(before, after, AgentModeUiChangeCellTolerance)
-            put("ui_changed", changedCells > 0)
-            // Raw scores go to the diagnostics log only (not the model-visible result), so the
-            // tolerance can be calibrated against real devices: run a no-op tap on a static page
-            // and read `ui_diff_sample` from events.jsonl.
-            diagnosticLogger.event(
-                category = "agent_mode",
-                event = "ui_diff_sample",
-                details = mapOf(
-                    "action" to action,
-                    "changed_cells" to changedCells,
-                    "max_cell_diff" to maxGridCellDifference(before, after),
-                    "cell_tolerance" to AgentModeUiChangeCellTolerance,
-                    "identical" to isIdenticalFrame(before, after),
-                ),
-            )
-        }
     }
 
     /**
@@ -1160,6 +1665,7 @@ class AgentModeController(
             put("image_width", capture.imageWidth)
             put("image_height", capture.imageHeight)
             put("coordinate_space", AgentModeCoordinateSpace)
+            put("source", AgentModeSourceOcr)
             put("match_count", matches.size)
             put("matches", elementsJson(matches, capture.imageWidth, capture.imageHeight))
             put("elements", elementsJson(capture.elements, capture.imageWidth, capture.imageHeight))
@@ -1181,6 +1687,7 @@ class AgentModeController(
         termuxWorkspaceDirectory: String,
         displayId: Int,
         query: String,
+        attachScreenshot: Boolean,
     ): String {
         var capture = captureDisplayText(settings)
             ?: return toolError(
@@ -1197,14 +1704,27 @@ class AgentModeController(
             capture = captureDisplayText(settings) ?: break
             match = matchElements(capture.elements, query).firstOrNull()
         }
-        val resolvedMatch = match
-            ?: return toolError(
-                message = "No element matching '$query' was found on the Agent Mode display " +
-                    "(${capture.elements.size} element(s) recognized after $scrollAttempts scroll " +
-                    "attempt(s); the display is left at its current scroll position). Nothing was " +
-                    "tapped. Call find_text or screenshot to inspect the available elements, then retry.",
-                action = "tap_text",
-            )
+        val resolvedMatch = match ?: run {
+            failureGuard.record(success = false, query = query)
+            return JSONObject().apply {
+                put("ok", false)
+                put("confirmed", false)
+                put("action", "tap_text")
+                put("query", query)
+                put("source", AgentModeSourceOcr)
+                put("reason", AgentModeReasonNodeNotFound)
+                put("confirmation", "无法确认")
+                put("screenshot_omitted", "not_requested")
+                put("elements", elementsJson(capture.elements, capture.imageWidth, capture.imageHeight))
+                put(
+                    "errmsg",
+                    "No element matching '$query' was found " +
+                        "(${capture.elements.size} OCR line(s) after $scrollAttempts scroll attempt(s)). " +
+                        "Nothing was tapped. These lines cannot confirm a control.",
+                )
+                put("stdout", "No control tree. OCR lines cannot confirm '$query'. Nothing was tapped.")
+            }.toString()
+        }
         val state = _displayState.value
         val targetX = screenshotPixelToDisplay(
             resolvedMatch.boundingBox.centerX(),
@@ -1223,22 +1743,28 @@ class AgentModeController(
                 action = "tap_text",
             )
         }
-        val beforeFrame = captureUiFingerprint(settings)
         requireAgentModeService(settings).tap(displayId, targetX, targetY)
         updateCursorPosition(targetX, targetY, animationDurationMillis = 180)
-        delay(AgentModeUiChangeSettleMillis)
-        val afterFrame = captureUiFingerprint(settings)
+        failureGuard.record(success = false, query = query)
         return captureAfterDelay(
             settings,
             workspaceDirectory,
             termuxWorkspaceDirectory,
-            delayMillis = 350,
+            delayMillis = if (attachScreenshot) 350 else 0,
             extras = focusExtras(settings, displayId)
-                .withUiChanged(beforeFrame, afterFrame, action = "tap_text")
+                .put("ok", true)
+                .put("confirmed", false)
                 .put("action", "tap_text")
                 .put("query", query)
+                .put("source", AgentModeSourceOcr)
+                .put("reason", AgentModeReasonOcrUnconfirmed)
+                .put("confirmation", "无法确认")
                 .put("matched_text", resolvedMatch.text)
                 .put("scroll_attempts", scrollAttempts)
+                .put(
+                    "stdout",
+                    "Tapped OCR text '${resolvedMatch.text}'. No control tree, so the tap is not confirmed.",
+                )
                 .put(
                     "matched_bbox_norm",
                     JSONArray().apply {
@@ -1249,7 +1775,7 @@ class AgentModeController(
                     },
                 ),
             includeElements = true,
-            unchangedFrom = beforeFrame,
+            attachScreenshot = attachScreenshot,
         )
     }
 
@@ -1263,7 +1789,9 @@ class AgentModeController(
     private fun coordinateDiagnostics(action: String, result: JSONObject?): Map<String, Any?> {
         if (result == null) return emptyMap()
         return buildMap<String, Any?> {
-            if (action == "tap" || action == "swipe" || action == "tap_text") {
+            if (action == "tap" || action == "swipe" || action == "tap_text" ||
+                action == "find_and_tap" || action == "find_and_input" || action == "tap_node"
+            ) {
                 result.optIntOrNull("cursor_x")?.let { put("injected_x", it) }
                 result.optIntOrNull("cursor_y")?.let { put("injected_y", it) }
                 result.optIntOrNull("cursor_norm_x")?.let { put("injected_norm_x", it) }

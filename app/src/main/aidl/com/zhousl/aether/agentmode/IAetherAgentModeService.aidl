@@ -19,5 +19,6 @@ interface IAetherAgentModeService {
     String listDisplaysJson() = 13;
     String listInstalledAppsJson() = 14;
     String focusedWindowJson(int displayId) = 15;
+    String interact(int displayId, String requestJson) = 16;
     void destroy() = 16777114;
 }
