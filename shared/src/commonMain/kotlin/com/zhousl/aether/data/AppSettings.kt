@@ -557,13 +557,22 @@ fun buildModelOptionKey(
     modelId: String,
 ): String = "$providerConfigId::$modelId"
 
-fun LlmProviderConfig.availableModels(): List<String> = normalizeStringList(cachedModels + manualModelIds)
-    .sortedByPreferredModelName()
+fun LlmProviderConfig.availableModels(): List<String> =
+    normalizeStringList(cachedModels + manualModelIds + xiaomiEnsuredModelIds(piProviderId))
+        .sortedByPreferredModelName()
 
 fun LlmProviderConfig.enabledModels(): List<String> {
-    val availableModels = availableModels().toHashSet()
-    return normalizeStringList(enabledModelIds.filter(availableModels::contains))
-        .sortedByPreferredModelName()
+    val availableModels = availableModels()
+    val available = availableModels.toHashSet()
+    val enabled = normalizeStringList(enabledModelIds.filter(available::contains)).toMutableList()
+    if (
+        isXiaomiBuiltinProvider(piProviderId) &&
+        MiMoV26FlashModelId in available &&
+        MiMoV26FlashModelId !in enabled
+    ) {
+        enabled += MiMoV26FlashModelId
+    }
+    return enabled.sortedByPreferredModelName()
 }
 
 fun List<String>.sortedByPreferredModelName(): List<String> = sortedWith(

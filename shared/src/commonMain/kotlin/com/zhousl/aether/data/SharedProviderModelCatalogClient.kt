@@ -34,6 +34,24 @@ data class SharedThinkingCatalogResult(
     val reasoningModels: Set<String> = emptySet(),
 )
 
+internal fun SharedThinkingCatalogResult.withMiMoThinking(
+    options: List<ProviderModelOption>,
+): SharedThinkingCatalogResult {
+    val levels = levelsByProviderModel.toMutableMap()
+    val maps = levelMapsByProviderModel.toMutableMap()
+    val reasoning = reasoningModels.toMutableSet()
+    var changed = false
+    options.forEach { option ->
+        val miMoLevels = miMoThinkingLevels(option.piProviderId, option.modelId) ?: return@forEach
+        val key = sharedThinkingCatalogKey(option.piProviderId, option.modelId)
+        levels[key] = miMoLevels
+        maps[key] = miMoThinkingLevelClamps()
+        reasoning += key
+        changed = true
+    }
+    return if (!changed) this else SharedThinkingCatalogResult(levels, maps, reasoning)
+}
+
 @Serializable
 data class SharedModelCatalogInfo(
     val displayName: String,
@@ -154,7 +172,7 @@ class SharedProviderModelCatalogClient(engine: HttpClientEngine? = null) {
             }
             SharedThinkingCatalogResult(levelsMap, levelMapsMap, reasoningModels)
         }
-    }.getOrDefault(SharedThinkingCatalogResult())
+    }.getOrDefault(SharedThinkingCatalogResult()).withMiMoThinking(options)
 
     suspend fun fetchThinkingLevels(
         options: List<ProviderModelOption>,

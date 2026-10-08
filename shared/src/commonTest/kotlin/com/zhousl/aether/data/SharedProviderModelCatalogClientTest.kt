@@ -317,6 +317,87 @@ class SharedProviderModelCatalogClientTest {
         assertEquals(emptyMap(), catalog.levelMapsByProviderModel)
         assertEquals(setOf(key), catalog.reasoningModels)
     }
+
+    @Test
+    fun miMoV26FlashKeepsReasoningAndImageSupportWhenThePublicCatalogIsEmpty() = runTest {
+        val engine = MockEngine {
+            respond(
+                """{"providers":{"xiaomi":{"models":{"mimo-v2.6-flash":{"id":"mimo-v2.6-flash","reasoning":true,"reasoning_options":[]}}}}}""",
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val options = listOf(
+            "xiaomi",
+            "xiaomi-token-plan-cn",
+            "xiaomi-token-plan-ams",
+            "xiaomi-token-plan-sgp",
+        ).map { providerId ->
+            listOf(
+                customConfig(piProviderId = providerId, baseUrl = "https://api.xiaomimimo.com/v1").copy(
+                    modelId = MiMoV26FlashModelId,
+                    manualModelIds = listOf(MiMoV26FlashModelId),
+                    cachedModels = listOf(MiMoV26FlashModelId),
+                    enabledModelIds = listOf(MiMoV26FlashModelId),
+                ),
+            ).availableModelOptions().single { it.modelId == MiMoV26FlashModelId }
+        }
+
+        val catalog = SharedProviderModelCatalogClient(engine).fetchThinkingCatalog(options)
+
+        options.forEach { option ->
+            val key = sharedThinkingCatalogKey(option.piProviderId, option.modelId)
+            assertEquals(listOf("off", "high"), catalog.levelsByProviderModel[key])
+            assertEquals(miMoThinkingLevelClamps(), catalog.levelMapsByProviderModel[key])
+            assertEquals(false, "off" in catalog.levelMapsByProviderModel.getValue(key))
+            assertTrue(key in catalog.reasoningModels)
+            assertTrue(option.supportsImageInput)
+        }
+    }
+
+    @Test
+    fun miMoThinkingOverrideStillAppliesWhenThePublicCatalogRequestFails() = runTest {
+        val engine = MockEngine {
+            respondError(HttpStatusCode.InternalServerError)
+        }
+        val option = listOf(
+            customConfig(piProviderId = "xiaomi", baseUrl = "https://api.xiaomimimo.com/v1").copy(
+                modelId = MiMoV26FlashModelId,
+                manualModelIds = listOf(MiMoV26FlashModelId),
+                cachedModels = listOf(MiMoV26FlashModelId),
+                enabledModelIds = listOf(MiMoV26FlashModelId),
+            ),
+        ).availableModelOptions().single { it.modelId == MiMoV26FlashModelId }
+
+        val catalog = SharedProviderModelCatalogClient(engine).fetchThinkingCatalog(listOf(option))
+        val key = sharedThinkingCatalogKey("xiaomi", MiMoV26FlashModelId)
+
+        assertEquals(listOf("off", "high"), catalog.levelsByProviderModel[key])
+        assertTrue(key in catalog.reasoningModels)
+    }
+
+    @Test
+    fun nonXiaomiMiMoIdDoesNotReceiveTheThinkingOverride() = runTest {
+        val engine = MockEngine {
+            respond(
+                """{"providers":{}}""",
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+        val option = listOf(
+            customConfig().copy(
+                modelId = MiMoV26FlashModelId,
+                manualModelIds = listOf(MiMoV26FlashModelId),
+                cachedModels = emptyList(),
+                enabledModelIds = listOf(MiMoV26FlashModelId),
+            ),
+        ).availableModelOptions().single()
+
+        val catalog = SharedProviderModelCatalogClient(engine).fetchThinkingCatalog(listOf(option))
+        val key = sharedThinkingCatalogKey(option.piProviderId, MiMoV26FlashModelId)
+
+        assertEquals(emptyList(), catalog.levelsByProviderModel[key])
+        assertTrue(key !in catalog.reasoningModels)
+    }
 }
 
 private fun customConfig(

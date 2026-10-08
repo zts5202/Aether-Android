@@ -59,11 +59,30 @@ data class PublicCatalogThinkingResult(
     val reasoningModels: Set<String> = emptySet(),
 )
 
+internal fun PublicCatalogThinkingResult.withMiMoThinking(
+    options: List<ProviderModelOption>,
+): PublicCatalogThinkingResult {
+    val levels = levelsByProviderModel.toMutableMap()
+    val maps = levelMapsByProviderModel.toMutableMap()
+    val reasoning = reasoningModels.toMutableSet()
+    var changed = false
+    options.forEach { option ->
+        val miMoLevels = miMoThinkingLevels(option.piProviderId, option.modelId) ?: return@forEach
+        val key = thinkingCatalogKey(option.piProviderId, option.modelId)
+        levels[key] = miMoLevels
+        maps[key] = miMoThinkingLevelClamps()
+        reasoning += key
+        changed = true
+    }
+    return if (!changed) this else PublicCatalogThinkingResult(levels, maps, reasoning)
+}
+
 internal fun publicCatalogThinkingResult(
     catalog: JSONObject,
     options: List<ProviderModelOption>,
 ): PublicCatalogThinkingResult {
-    val providers = catalog.optJSONObject("providers") ?: return PublicCatalogThinkingResult()
+    val providers = catalog.optJSONObject("providers")
+        ?: return PublicCatalogThinkingResult().withMiMoThinking(options)
     val levelsMap = mutableMapOf<String, List<String>>()
     val levelMapsMap = mutableMapOf<String, Map<String, String>>()
     val reasoningModels = mutableSetOf<String>()
@@ -105,6 +124,7 @@ internal fun publicCatalogThinkingResult(
         }
     }
     return PublicCatalogThinkingResult(levelsMap, levelMapsMap, reasoningModels)
+        .withMiMoThinking(options)
 }
 
 internal fun publicCatalogThinkingLevels(
@@ -162,7 +182,7 @@ object ProviderModelCatalogClient {
                 } finally {
                     connection.disconnect()
                 }
-            }.getOrDefault(PublicCatalogThinkingResult())
+            }.getOrDefault(PublicCatalogThinkingResult()).withMiMoThinking(options)
         }
 
     suspend fun fetchPublicThinkingLevels(options: List<ProviderModelOption>): Map<String, List<String>> =

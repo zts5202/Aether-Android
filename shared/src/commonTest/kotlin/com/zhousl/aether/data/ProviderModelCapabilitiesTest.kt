@@ -71,6 +71,53 @@ class ProviderModelCapabilitiesTest {
     }
 
     @Test
+    fun miMoV26FlashStaysVisionCapableWhenTheCatalogSaysTextOnly() {
+        val capabilities = parse(
+            """
+            {
+              "providers": [
+                {
+                  "id": "xiaomi",
+                  "models": [
+                    {"id": "mimo-v2.6-flash", "input": ["text"]},
+                    {"id": "mimo-v2.5", "input": ["text"]}
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertTrue(capabilities.supportsImageInput("xiaomi", "mimo-v2.6-flash"))
+        assertTrue(capabilities.supportsImageInput("xiaomi-token-plan-sgp", "Xiaomi/MiMo-V2.6-Flash"))
+        assertTrue(capabilities.supportsImageInput("xiaomi", "mimo-v2.6-pro"))
+        assertTrue(capabilities.supportsImageInput("xiaomi", "mimo-v2.5"))
+    }
+
+    @Test
+    fun miMoV25ProStaysTextOnlyWhenUnreportedOrMarkedAsVision() {
+        val capabilities = parse(
+            """
+            {
+              "providers": [
+                {
+                  "id": "xiaomi",
+                  "models": [
+                    {"id": "mimo-v2.5-pro", "input": ["text", "image"]}
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        assertFalse(capabilities.supportsImageInput("xiaomi", "mimo-v2.5-pro"))
+        assertFalse(capabilities.supportsImageInput("xiaomi-token-plan-cn", "mimo-v2.5-pro-ultraspeed"))
+        assertTrue(capabilities.supportsImageInput("openai", "some-custom-model"))
+        assertTrue(capabilities.supportsImageInput("xiaomi", "not-a-mimo-model"))
+    }
+
+    @Test
     fun malformedPayloadsDegradeToEmpty() {
         assertEquals(0, parseProviderModelCapabilities("not json").reportedModelCount)
         assertEquals(0, parseProviderModelCapabilities("{}").reportedModelCount)

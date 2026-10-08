@@ -1015,6 +1015,62 @@ function developerRoleFallbackStreams(
   };
 }
 
+const XIAOMI_PROVIDER_IDS = new Set([
+  "xiaomi",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-sgp",
+]);
+
+function isMiMoV2ModelId(modelId: string): boolean {
+  return modelId.split("/").pop()?.trim().toLowerCase().startsWith("mimo-v2") ?? false;
+}
+
+function shouldUseMiMoThinking(model: { id: string; provider: string; baseUrl: string }): boolean {
+  if (!isMiMoV2ModelId(model.id)) return false;
+  const provider = model.provider.trim().toLowerCase();
+  if (XIAOMI_PROVIDER_IDS.has(provider)) return true;
+  const base = model.baseUrl.toLowerCase();
+  return base.includes("xiaomimimo.com") || base.includes("mimo.mi.com");
+}
+
+/** Vision ids from Xiaomi's Chat Completions image docs. Text-only Pro ids stay text. */
+function miMoChatInput(modelId: string): Array<"text" | "image"> | undefined {
+  const id = modelId.split("/").pop()?.trim().toLowerCase() ?? "";
+  if (
+    id === "mimo-v2.6-flash" ||
+    id === "mimo-v2.6-pro" ||
+    id === "mimo-v2.6-pro-ultraspeed" ||
+    id === "mimo-v2.5"
+  ) {
+    return ["text", "image"];
+  }
+  if (id === "mimo-v2.5-pro" || id === "mimo-v2.5-pro-ultraspeed") {
+    return ["text"];
+  }
+  return undefined;
+}
+
+/**
+ * Xiaomi Chat Completions only honors `thinking.type` = enabled | disabled.
+ * `reasoning_effort` is not a parameter of that API, so it must not be sent.
+ */
+function withMiMoChatCompat<T extends Model<string>>(model: T): T {
+  if (!shouldUseMiMoThinking(model)) return model;
+  const input = miMoChatInput(model.id);
+  return {
+    ...model,
+    reasoning: true,
+    ...(input ? { input } : {}),
+    compat: {
+      ...(model.compat ?? {}),
+      thinkingFormat: "deepseek",
+      supportsReasoningEffort: false,
+      requiresReasoningContentOnAssistantMessages: true,
+    },
+  };
+}
+
 function createAetherModel(config: ModelConfig): Model<string> {
   return {
     id: config.model_id,
@@ -1169,11 +1225,17 @@ function buildModels(config: ModelConfig): {
         ...config.custom_headers,
       },
     } as Model<string>;
-    return { models, model, provider, credentialStore, compatibilityFallbackState };
+    return {
+      models,
+      model: withMiMoChatCompat(model),
+      provider,
+      credentialStore,
+      compatibilityFallbackState,
+    };
   }
 
   const models = createModels();
-  const model = createAetherModel(config);
+  const model = withMiMoChatCompat(createAetherModel(config));
   bridgeDebug("build_models_path", { path: "custom", pi_api: config.pi_api });
   const headers = config.custom_headers ?? {};
   const provider = createProvider({
