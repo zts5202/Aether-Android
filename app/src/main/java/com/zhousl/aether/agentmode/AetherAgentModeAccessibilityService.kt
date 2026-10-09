@@ -61,7 +61,7 @@ class AetherAgentModeAccessibilityService : AccessibilityService() {
     }
 
     private fun windowHasRoot(window: AccessibilityWindowInfo): Boolean {
-        val root = window.root ?: return false
+        val root = window.agentModeRoot() ?: return false
         runCatching { root.recycle() }
         return true
     }

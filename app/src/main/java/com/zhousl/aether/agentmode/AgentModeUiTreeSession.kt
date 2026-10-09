@@ -556,7 +556,7 @@ internal class AgentModeUiTreeSession(
     private fun collect(windows: List<AccessibilityWindowInfo>): List<Collected> {
         val collected = mutableListOf<Collected>()
         for (window in windows) {
-            val root = window.root ?: continue
+            val root = window.agentModeRoot() ?: continue
             root.refresh()
             walk(root, parentIndex = -1, collected)
         }

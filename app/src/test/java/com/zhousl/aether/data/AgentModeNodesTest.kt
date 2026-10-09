@@ -118,9 +118,52 @@ class AgentModeNodesTest {
                 assertTrue(action, agentModeAttachesScreenshot(action, includeScreenshot = true))
             }
         assertTrue(agentModeAttachesScreenshot("screenshot", includeScreenshot = false))
-        assertTrue(agentModeAttachesScreenshot("launch", includeScreenshot = false))
+        assertFalse(agentModeAttachesScreenshot("launch", includeScreenshot = false))
+        assertTrue(agentModeAttachesScreenshot("launch", includeScreenshot = true))
+        assertTrue(agentModeAttachesScreenshot("start", includeScreenshot = false))
         assertTrue(agentModeWantsScreenshot(JSONObject().put("include_screenshot", true)))
         assertFalse(agentModeWantsScreenshot(JSONObject()))
+    }
+
+    @Test
+    fun emptyTreeOnEverySourceIsCachedButAMissingDisplayIsNot() {
+        fun row(available: Boolean, reason: String) = JSONObject()
+            .put("available", available)
+            .put("reason", reason)
+
+        val bothEmpty = JSONArray()
+            .put(row(false, AgentModeReasonEmptyTree))
+            .put(row(false, AgentModeReasonEmptyTree))
+        assertTrue(agentModeShouldCacheEmptyTree(bothEmpty))
+
+        val oneAvailable = JSONArray()
+            .put(row(true, "ok"))
+            .put(row(false, AgentModeReasonEmptyTree))
+        assertFalse(agentModeShouldCacheEmptyTree(oneAvailable))
+
+        val notInTree = JSONArray()
+            .put(row(false, AgentModeReasonEmptyTree))
+            .put(row(false, AgentModeReasonDisplayNotInTree))
+        assertFalse(agentModeShouldCacheEmptyTree(notInTree))
+
+        val otherDisplay = JSONArray()
+            .put(row(false, AgentModeReasonOtherDisplay))
+            .put(row(false, AgentModeReasonEmptyTree))
+        assertFalse(agentModeShouldCacheEmptyTree(otherDisplay))
+
+        val notReturned = JSONArray()
+            .put(row(false, AgentModeReasonEmptyTree))
+            .put(row(false, "not_returned"))
+        assertTrue(agentModeShouldCacheEmptyTree(notReturned))
+        assertFalse(agentModeShouldCacheEmptyTree(JSONArray()))
+    }
+
+    @Test
+    fun scrollingIsOptInAndNeverUsedForASendLabel() {
+        assertFalse(agentModeMayScrollForLabel("发送", requested = true))
+        assertFalse(agentModeMayScrollForLabel("Send", requested = true))
+        assertFalse(agentModeMayScrollForLabel("WLAN", requested = false))
+        assertTrue(agentModeMayScrollForLabel("WLAN", requested = true))
     }
 
     @Test

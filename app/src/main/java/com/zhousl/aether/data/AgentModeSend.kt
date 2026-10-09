@@ -37,6 +37,49 @@ internal fun agentModeSendCheck(
     }
 }
 
+internal data class AgentModeFocusPoint(
+    val x: Int,
+    val y: Int,
+)
+
+/** True when [message] is visible in the composer band, not merely somewhere in the chat history. */
+internal fun agentModeComposerHasText(message: String, lines: List<AgentModeVisibleLine>): Boolean {
+    val needle = message.trim()
+    if (needle.isEmpty()) return false
+    val composer = lines
+        .filter { it.top >= AgentModeComposerBandTop }
+        .joinToString(separator = "") { it.text }
+    if (composer.contains(needle)) return true
+    val compactNeedle = needle.filterNot(Char::isWhitespace)
+    if (compactNeedle.length < 2) return false
+    return composer.filterNot(Char::isWhitespace).contains(compactNeedle)
+}
+
+/**
+ * A point in the composer, left of a send button. Falls back to the left side of the bottom bar
+ * when OCR has no field, so the tap does not land on 发送.
+ */
+internal fun agentModeComposerFocusPoint(
+    elements: List<AgentModeTextElement>,
+    imageWidth: Int,
+    imageHeight: Int,
+): AgentModeFocusPoint {
+    if (imageWidth <= 0 || imageHeight <= 0) return AgentModeFocusPoint(400, 960)
+    val target = elements
+        .filter { element ->
+            element.granularity != AgentModeOcrGranularity.SYMBOL &&
+                normalizeAgentModePixel(element.boundingBox.top, imageHeight) >= AgentModeComposerBandTop &&
+                !agentModeSendLike(element.text, normalizedX = null, normalizedY = null) &&
+                normalizeAgentModePixel(element.boundingBox.centerX(), imageWidth) < 750
+        }
+        .maxByOrNull { it.boundingBox.right - it.boundingBox.left }
+        ?: return AgentModeFocusPoint(400, 960)
+    return AgentModeFocusPoint(
+        x = normalizeAgentModePixel(target.boundingBox.centerX(), imageWidth).coerceAtMost(700),
+        y = normalizeAgentModePixel(target.boundingBox.centerY(), imageHeight),
+    )
+}
+
 internal fun agentModeSendLike(query: String?, normalizedX: Int?, normalizedY: Int?): Boolean {
     val label = query?.trim()?.lowercase().orEmpty()
     if (label.isNotEmpty()) return label in AgentModeSendLabels

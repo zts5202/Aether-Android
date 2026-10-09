@@ -106,6 +106,30 @@ class AgentModeOcrSendTest {
     }
 
     @Test
+    fun composerTextIgnoresChatHistory() {
+        assertTrue(agentModeComposerHasText("我需要你", listOf(AgentModeVisibleLine("我需要你", 960))))
+        assertFalse(agentModeComposerHasText("我需要你", listOf(AgentModeVisibleLine("我需要你", 700))))
+        assertFalse(agentModeComposerHasText("", listOf(AgentModeVisibleLine("我需要你", 960))))
+        assertTrue(agentModeComposerHasText("今天 不吃饭", listOf(AgentModeVisibleLine("今天不吃饭", 900))))
+    }
+
+    @Test
+    fun composerFocusStaysLeftOfTheSendButton() {
+        val field = element("说点什么", AgentModeOcrBox(40, 940, 700, 990), AgentModeOcrGranularity.LINE)
+        val send = element("发送", AgentModeOcrBox(874, 960, 951, 977), AgentModeOcrGranularity.ELEMENT)
+        val point = agentModeComposerFocusPoint(listOf(field, send), imageWidth = 1000, imageHeight = 1000)
+        assertTrue(point.x <= 700)
+        assertTrue(point.y >= AgentModeComposerBandTop)
+
+        val onlySend = agentModeComposerFocusPoint(listOf(send), imageWidth = 1000, imageHeight = 1000)
+        assertEquals(400, onlySend.x)
+        assertEquals(960, onlySend.y)
+        val missing = agentModeComposerFocusPoint(emptyList(), imageWidth = 0, imageHeight = 0)
+        assertEquals(400, missing.x)
+        assertEquals(960, missing.y)
+    }
+
+    @Test
     fun mergedOcrLineIsRejectedAndARealMessageIsNot() {
         assertTrue(agentModeInputLooksLikeMergedOcr("不要这样,今天不吃饭了。 (G发送"))
         assertFalse(agentModeInputLooksLikeMergedOcr("今天不吃饭了。"))

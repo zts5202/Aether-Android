@@ -23,6 +23,7 @@ internal const val AgentModeReasonActionClick = "action_click"
 internal const val AgentModeReasonActionFocus = "action_focus"
 internal const val AgentModeReasonActionSetText = "action_set_text"
 internal const val AgentModeReasonClipboardPaste = "clipboard_paste"
+internal const val AgentModeReasonFocusThenPaste = "focus_then_clipboard_paste"
 internal const val AgentModeReasonFocusChanged = "focus_or_text_changed"
 internal const val AgentModeReasonOcrUnconfirmed = "ocr_unconfirmed"
 internal const val AgentModeReasonInjectedUnconfirmed = "injected_unconfirmed"
@@ -49,16 +50,44 @@ private val ScreenshotOnRequestActions = setOf(
     "find_and_tap",
     "find_and_input",
     "tap_node",
+    "launch",
 )
 
 /**
- * `screenshot` always attaches an image. The gesture and composite actions attach one only when the
- * caller passes `include_screenshot`. Other actions (start, launch) keep attaching an image.
+ * `screenshot` always attaches an image. Gestures, composite actions, and launch attach one only
+ * when the caller passes `include_screenshot`. Launch already returns the new screen's OCR elements.
  */
 internal fun agentModeAttachesScreenshot(action: String, includeScreenshot: Boolean): Boolean {
     if (action == "screenshot") return true
     if (action in ScreenshotOnRequestActions) return includeScreenshot
     return true
+}
+
+/**
+ * A missing label is not a reason to scroll. Scrolling is opt-in, and a send label never scrolls:
+ * that search walks back through chat history.
+ */
+internal fun agentModeMayScrollForLabel(query: String, requested: Boolean): Boolean {
+    if (!requested) return false
+    return !agentModeSendLike(query, normalizedX = null, normalizedY = null)
+}
+
+/**
+ * Cache the miss when every source was unusable and at least one saw windows with no controls.
+ * A display that is simply not in the tree yet can still appear, so that result is not cached.
+ */
+internal fun agentModeShouldCacheEmptyTree(attempts: JSONArray): Boolean {
+    if (attempts.length() == 0) return false
+    var sawEmptyTree = false
+    for (index in 0 until attempts.length()) {
+        val row = attempts.optJSONObject(index) ?: return false
+        if (row.optBoolean("available")) return false
+        when (row.optString("reason")) {
+            AgentModeReasonEmptyTree -> sawEmptyTree = true
+            AgentModeReasonDisplayNotInTree, AgentModeReasonOtherDisplay -> return false
+        }
+    }
+    return sawEmptyTree
 }
 
 internal fun agentModeWantsScreenshot(arguments: JSONObject): Boolean =

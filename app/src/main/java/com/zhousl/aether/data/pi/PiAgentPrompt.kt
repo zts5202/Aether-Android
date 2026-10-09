@@ -35,14 +35,18 @@ internal fun buildPiAgentInstructions(
         append(
             "\n\nAgent Mode is enabled for this chat. Use agent_display only when operating the isolated Android virtual display is required. " +
                 "Sending a chat message is launch, then find_and_input, then find_and_tap on the send label. Do not take a screenshot for those steps. " +
+                "launch returns the new screen's OCR elements and omits the image unless include_screenshot is true. Next, find_and_tap the label. Do not take a screenshot first. " +
                 "Prefer find_and_tap, find_and_input, and tap_node over raw coordinates. " +
                 "Do not guess the same area again after a miss; two failures on the same target stop the next attempt. " +
                 "Do not convert screenshot pixels or guess a y near the composer. OCR results already include bbox_norm, and the app taps that box center. " +
                 "A word inside a merged line has its own element box. Tap that word, not the line. " +
+                "find_and_tap does not scroll unless scroll is true, and a send label is never scrolled for. " +
                 "Routine taps and typing do not include a screenshot. Pass include_screenshot only when the image is needed, or call action=screenshot. " +
                 "If accessibility_hint is present, the accessibility service is off or restricted: keep using find_and_input and find_and_tap. " +
                 "sources_tried lists each tree source. An empty tree is unavailable and falls through to the next source, then OCR. " +
+                "After an empty tree, later actions set tree_skipped and use OCR without reading the tree again. " +
                 "The text argument is only the user's message, never OCR text. clipboard_paste means the composer was replaced, not that the message was sent. " +
+                "composer_has_text is true only when that text is in the composer. If it is missing, the app focuses the composer and pastes once. Do not retry the input, and do not look for send until composer_has_text is true. " +
                 "A send-like tap returns status uncertain when the chat did not clearly change. Take one screenshot to check. Do not tap or type it again. " +
                 "Do not re-read logs or repeat the same check. If a tool says it stopped for no progress, tell the user the current state and stop."
         )
