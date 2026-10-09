@@ -249,6 +249,7 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
         "description",
         "Operate Aether Agent Mode on an isolated Android virtual display. Use this only when Agent Mode is selected in the chat composer. " +
             "Sending a chat message is launch, then find_and_input, then find_and_tap on the send label. Do not take a screenshot for those steps. " +
+            "launch returns the new screen's OCR elements and omits the image unless include_screenshot is true. Next, find_and_tap the label. Do not take a screenshot first. " +
             "Prefer find_and_tap, find_and_input, and tap_node. They use controls on this virtual display only. " +
             "Do not guess coordinates in the same area again after a miss: two failures on the same query, node id, or nearby point stop the third attempt and nothing is injected. " +
             "tap/swipe coordinates are normalized 0..1000 on each axis, independent of resolution; values above 1000 are rejected. " +
@@ -256,8 +257,10 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
             "source is ui_automation, accessibility_service, or ocr. Nodes, nearby nodes, and focus come only from the Agent Mode display. " +
             "accessibility_hint means the accessibility service is off or restricted. Do not guess coordinates. " +
             "find_and_input clears and replaces the field: set-text when an editable node exists, otherwise clipboard paste on this display. Do not use shell input text. clipboard_paste means the composer was replaced, not that the message was sent. Pass only the user's message, never an OCR line. " +
-            "screenshot always attaches an image. tap, swipe, key, text, tap_text, find_and_tap, find_and_input, and tap_node omit the image unless include_screenshot is true; the result then has screenshot_omitted=\"not_requested\". " +
-            "An empty control tree is unavailable. sources_tried lists ui_automation, then accessibility_service, then ocr. " +
+            "composer_has_text is true only when that text is in the composer. If it is missing, the app focuses the composer and pastes once. Do not retry the input, and do not look for send until composer_has_text is true. " +
+            "screenshot always attaches an image. launch, tap, swipe, key, text, tap_text, find_and_tap, find_and_input, and tap_node omit the image unless include_screenshot is true; the result then has screenshot_omitted=\"not_requested\". " +
+            "find_and_tap and tap_text do not scroll unless scroll is true, and a send label is never scrolled for. " +
+            "An empty control tree is unavailable. sources_tried lists ui_automation, then accessibility_service, then ocr. After empty_tree, later actions set tree_skipped and skip the tree read. " +
             "OCR elements use text, granularity, and bbox_norm = [left, top, right, bottom] in 0..1000. find_and_tap and tap_text tap the exact word's box center, not a merged line. Do not convert screenshot pixels. " +
             "A send-like tap is confirmed only when the composer clears or the message appears as a new bubble. Otherwise status is uncertain: take one screenshot and do not tap or type again. " +
             "Do not re-read logs. Repeating the same check with no progress stops the turn. " +
@@ -273,7 +276,8 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
                     put("action", stringProperty("One of: list_apps, start, status, launch, find_and_tap, find_and_input, tap_node, tap, swipe, key, text, screenshot, stop, find_text, tap_text."))
                     put("query", stringProperty("For list_apps: optional app label, package, or activity filter. For find_and_tap, find_and_input, find_text, and tap_text: the on-screen text to locate (exact match preferred, then substring)."))
                     put("node_id", stringProperty("For tap_node: id from the latest nodes list, such as n1."))
-                    put("include_screenshot", booleanProperty("Attach a screenshot for tap, swipe, key, text, tap_text, find_and_tap, find_and_input, or tap_node. Default false. screenshot always attaches an image."))
+                    put("include_screenshot", booleanProperty("Attach a screenshot for launch, tap, swipe, key, text, tap_text, find_and_tap, find_and_input, or tap_node. Default false. launch already returns OCR elements. screenshot always attaches an image."))
+                    put("scroll", booleanProperty("For find_and_tap and tap_text: scroll to look for a label below the fold. Default false. Ignored for a send label such as 发送."))
                     put("include_system", booleanProperty("For list_apps: whether to include system apps."))
                     put("max_results", integerProperty("For list_apps: maximum number of apps to return."))
                     put("target", stringProperty("For launch: package name or exact app label."))
@@ -294,7 +298,8 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
                         "text",
                         stringProperty(
                             "For text and find_and_input: only the user's message, including Chinese, never text copied from OCR. " +
-                                "The field is cleared and replaced. Sending is a separate tap. Do not tap the field first.",
+                                "The field is cleared and replaced. Sending is a separate tap. Do not tap the field first. " +
+                                "If composer_has_text is false, the app already retried once. Do not paste again.",
                         ),
                     )
                 },

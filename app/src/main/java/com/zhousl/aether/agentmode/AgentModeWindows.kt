@@ -2,6 +2,7 @@ package com.zhousl.aether.agentmode
 
 import android.os.Build
 import android.util.SparseArray
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.zhousl.aether.data.AgentModeWindowCandidate
 import com.zhousl.aether.data.selectAgentModeWindowIndexes
@@ -42,4 +43,17 @@ internal fun windowsForRequestedDisplay(
         if (index !in acceptedIndexes) runCatching { window.recycle() }
     }
     return AgentModeWindowBatch(accepted, selection.foreignDisplayIds)
+}
+
+/**
+ * Prefers a root whose descendants are already loaded. On a virtual display, the no-argument
+ * `getRoot()` often returns a window whose children are still empty.
+ */
+internal fun AccessibilityWindowInfo.agentModeRoot(): AccessibilityNodeInfo? {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val strategy = AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_HYBRID or
+            AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE
+        runCatching { getRoot(strategy) }.getOrNull()?.let { return it }
+    }
+    return root
 }

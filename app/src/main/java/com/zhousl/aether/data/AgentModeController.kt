@@ -194,6 +194,7 @@ class AgentModeController(
     private val failureGuard = AgentModeFailureGuard()
     private val sendGate = AgentModeSendGate()
     private var lastInputText: String = ""
+    private var emptyTreeDisplayId: Int? = null
     private var lastModelNodes: List<AgentModeNode> = emptyList()
     private var lastSnapshotId: String = ""
     private var lastSource: String = ""
@@ -274,6 +275,15 @@ class AgentModeController(
                         workspaceDirectory,
                         termuxWorkspaceDirectory,
                         delayMillis = 900,
+                        extras = JSONObject()
+                            .put("action", "launch")
+                            .put("target", target)
+                            .put(
+                                "stdout",
+                                "Launched the app. elements lists the new screen. Next, find_and_tap the label. Do not take a screenshot first.",
+                            ),
+                        includeElements = true,
+                        attachScreenshot = agentModeAttachesScreenshot("launch", agentModeWantsScreenshot(arguments)),
                     )
                 }
             }
@@ -425,6 +435,7 @@ class AgentModeController(
             displaySpec.densityDpi,
         )
         shizukuDisplayId = displayId
+        emptyTreeDisplayId = null
         displayOwnerMethod = settings.agentModeAuthorizationMethod
         displayOwnerBinder = serviceBinder
         diagnosticLogger.event(
@@ -833,13 +844,14 @@ class AgentModeController(
         val text = arguments.optString("text")
         if (text.isEmpty()) return invalidArguments("Missing required 'text' argument.")
         mergedOcrInputBlock(text, "text")?.let { return it }
+        lastInputText = text
         val tree = invokeTree(
             settings,
             displayId,
             JSONObject().put("op", "set_text").put("text", text),
         )
         val attach = agentModeAttachesScreenshot("text", agentModeWantsScreenshot(arguments))
-        val body = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
+        val initial = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
             pasteOnDisplay(settings, displayId, text).put("action", "text").also { pasted ->
                 copyTreeDiagnosis(tree, pasted)
             }
@@ -851,6 +863,7 @@ class AgentModeController(
             }
             tree
         }
+        val body = finishInput(settings, displayId, text, tree, initial, "text")
         rememberNodes(body)
         if (!body.optBoolean("confirmed")) attachNearby(body, null, null)
         return deliver(
@@ -930,6 +943,7 @@ class AgentModeController(
                 attachScreenshot = attach,
                 diagnosis = tree,
                 action = "find_and_tap",
+                allowScroll = arguments.optBoolean("scroll", false),
             )
         }
         tree.put("action", "find_and_tap")
@@ -959,6 +973,7 @@ class AgentModeController(
         val text = arguments.optString("text")
         if (text.isEmpty()) return invalidArguments("Missing required 'text' argument for find_and_input.")
         mergedOcrInputBlock(text, "find_and_input")?.let { return it }
+        lastInputText = text
         val query = arguments.optString("query").trim()
         val point = optionalPoint(arguments)
         if (point is ResolvedPoint.Invalid) return invalidArguments(point.message)
@@ -982,35 +997,29 @@ class AgentModeController(
                 .put("query", query),
         )
         val attach = agentModeAttachesScreenshot("find_and_input", agentModeWantsScreenshot(arguments))
-        val body = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
-            val pasted = pasteOnDisplay(settings, displayId, text) {
+        val initial = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
+            pasteOnDisplay(settings, displayId, text) {
                 if (validPoint != null) {
                     requireAgentModeService(settings).tap(displayId, validPoint.x, validPoint.y)
                     updateCursorPosition(validPoint.x, validPoint.y, animationDurationMillis = 180)
                     delay(200)
                 }
-            }.put("action", "find_and_input")
-            copyTreeDiagnosis(tree, pasted)
-            failureGuard.record(
-                success = pasted.optBoolean("confirmed"),
-                query = guardQuery,
-                normalizedX = normX,
-                normalizedY = normY,
-            )
-            pasted
+            }.put("action", "find_and_input").also { pasted ->
+                copyTreeDiagnosis(tree, pasted)
+            }
         } else {
             tree.put("action", "find_and_input")
             rememberCursor(tree, fallbackX = validPoint?.x, fallbackY = validPoint?.y)
-            val confirmed = tree.optBoolean("confirmed")
-            failureGuard.record(
-                success = confirmed,
-                query = guardQuery,
-                normalizedX = normX,
-                normalizedY = normY,
-            )
-            if (!confirmed) attachNearby(tree, normX, normY)
             tree
         }
+        val body = finishInput(settings, displayId, text, tree, initial, "find_and_input")
+        failureGuard.record(
+            success = body.optBoolean("confirmed"),
+            query = guardQuery,
+            normalizedX = normX,
+            normalizedY = normY,
+        )
+        if (!body.optBoolean("confirmed")) attachNearby(body, normX, normY)
         rememberNodes(body)
         return deliver(
             settings,
@@ -1095,6 +1104,7 @@ class AgentModeController(
             displayId,
             query,
             attachScreenshot = agentModeAttachesScreenshot("tap_text", agentModeWantsScreenshot(arguments)),
+            allowScroll = arguments.optBoolean("scroll", false),
         )
     }
 
@@ -1106,6 +1116,7 @@ class AgentModeController(
         val state = _displayState.value
         if (!request.has("width")) request.put("width", state.width.coerceAtLeast(1))
         if (!request.has("height")) request.put("height", state.height.coerceAtLeast(1))
+        if (emptyTreeDisplayId == displayId) return cachedEmptyTree(displayId)
         val payload = request.toString()
         val tried = JSONArray()
         val privileged = runCatching {
@@ -1133,7 +1144,36 @@ class AgentModeController(
                 return fallback
             }
         }
-        return unavailableTree(privileged, fallback).put("sources_tried", tried)
+        val unavailable = unavailableTree(privileged, fallback).put("sources_tried", tried)
+        if (agentModeShouldCacheEmptyTree(unavailable.optJSONArray("sources_tried") ?: JSONArray())) {
+            emptyTreeDisplayId = displayId
+        }
+        return unavailable
+    }
+
+    private fun cachedEmptyTree(displayId: Int): JSONObject {
+        fun skipped(source: String) = JSONObject()
+            .put("source", source)
+            .put("available", false)
+            .put("reason", AgentModeReasonEmptyTree)
+            .put("skipped", true)
+            .put("node_count", 0)
+            .put("candidate_count", 0)
+            .put("errmsg", "Skipped. This display already returned an empty control tree.")
+        return JSONObject()
+            .put("available", false)
+            .put("use_ocr", true)
+            .put("ok", false)
+            .put("confirmed", false)
+            .put("source", AgentModeSourceOcr)
+            .put("reason", AgentModeReasonEmptyTree)
+            .put("tree_skipped", true)
+            .put("nodes", JSONArray())
+            .put(
+                "errmsg",
+                "Display $displayId has windows but no interactive controls. Further actions skip the control tree and use OCR.",
+            )
+            .put("sources_tried", JSONArray().put(skipped(AgentModeSourceUiAutomation)).put(skipped(AgentModeSourceAccessibility)))
     }
 
     /** One row of `sources_tried`. `available` means the read was usable, not merely that a window existed. */
@@ -1254,11 +1294,97 @@ class AgentModeController(
         if (tree.has("accessibility_hint")) target.put("accessibility_hint", tree.optString("accessibility_hint"))
         if (tree.has("foreign_display_ids")) target.put("foreign_display_ids", tree.opt("foreign_display_ids"))
         if (tree.has("sources_tried")) target.put("sources_tried", tree.opt("sources_tried"))
+        if (tree.optBoolean("tree_skipped")) target.put("tree_skipped", true)
         if (tree.optString("reason") == AgentModeReasonAccessibilityDisabled ||
             tree.optString("reason") == AgentModeReasonOtherDisplay ||
             tree.optString("reason") == AgentModeReasonEmptyTree
         ) {
             target.put("tree_reason", tree.optString("reason"))
+        }
+    }
+
+    /**
+     * Confirms the user's text is in the composer. One miss retries by focusing the field and pasting.
+     * A second miss is reported as-is so the caller does not look for a send button.
+     */
+    private suspend fun finishInput(
+        settings: AppSettings,
+        displayId: Int,
+        text: String,
+        tree: JSONObject,
+        body: JSONObject,
+        action: String,
+    ): JSONObject {
+        val checked = ensureComposerFlag(settings, body, text)
+        if (checked.optBoolean("composer_has_text")) {
+            checked.put("ok", true)
+            checked.put("confirmed", true)
+            checked.put(
+                "stdout",
+                "The composer shows the user's text. Sending is a separate tap. Do not paste this text again.",
+            )
+            return checked
+        }
+        val retried = pasteOnDisplay(settings, displayId, text) {
+            val capture = captureDisplayText(settings)
+            focusComposer(settings, displayId, capture)
+        }
+            .put("action", action)
+            .put("input_attempt", 2)
+            .put("reason", AgentModeReasonFocusThenPaste)
+        copyTreeDiagnosis(tree, retried)
+        val seen = retried.optBoolean("composer_has_text")
+        retried.put("ok", seen)
+        retried.put("confirmed", seen)
+        retried.put(
+            "stdout",
+            if (seen) {
+                "The first input did not appear in the composer. Focused the composer and pasted once. " +
+                    "The composer now shows the user's text. Sending is a separate tap."
+            } else {
+                "The composer still does not show the user's text after focusing it and pasting once. " +
+                    "Do not look for the send button."
+            },
+        )
+        return retried
+    }
+
+    private suspend fun ensureComposerFlag(
+        settings: AppSettings,
+        body: JSONObject,
+        text: String,
+    ): JSONObject {
+        if (body.has("composer_has_text")) return body
+        val capture = captureDisplayText(settings)
+        val seen = if (capture != null) {
+            agentModeComposerHasText(text, visibleLines(capture))
+        } else {
+            body.optBoolean("confirmed") && body.optString("reason") == AgentModeReasonActionSetText
+        }
+        body.put("composer_has_text", seen)
+        if (capture != null && !body.has("elements")) {
+            body.put("elements", elementsJson(capture.elements, capture.imageWidth, capture.imageHeight))
+        }
+        return body
+    }
+
+    private suspend fun focusComposer(
+        settings: AppSettings,
+        displayId: Int,
+        capture: DisplayTextCapture?,
+    ) {
+        val point = if (capture == null) {
+            AgentModeFocusPoint(400, 960)
+        } else {
+            agentModeComposerFocusPoint(capture.elements, capture.imageWidth, capture.imageHeight)
+        }
+        val state = _displayState.value
+        val x = resolveAgentModeCoordinate("x", point.x.toDouble(), state.width)
+        val y = resolveAgentModeCoordinate("y", point.y.toDouble(), state.height)
+        if (x is AgentModeCoordinateResult.Valid && y is AgentModeCoordinateResult.Valid) {
+            requireAgentModeService(settings).tap(displayId, x.pixel, y.pixel)
+            updateCursorPosition(x.pixel, y.pixel, animationDurationMillis = 180)
+            delay(200)
         }
     }
 
@@ -1824,49 +1950,30 @@ class AgentModeController(
         text: String,
         beforePaste: (suspend () -> Unit)? = null,
     ): JSONObject {
-        val before = captureDisplayText(settings)
         beforePaste?.invoke()
         lastInputText = text
         val method = requireAgentModeService(settings).text(displayId, text)
         delay(250)
         val after = captureDisplayText(settings)
-        val textSeen = after != null && agentModeTextVisible(text, after.elements.map { it.text })
-        val regionChanged = before?.fingerprint != null && after?.fingerprint != null &&
-            agentModeRegionChanged(
-                before.fingerprint,
-                after.fingerprint,
-                agentModeRegionCellIndexes(
-                    500,
-                    940,
-                    AgentModeUiChangeGridColumns,
-                    AgentModeUiChangeGridRows,
-                    radius = 140,
-                ),
-            )
-        val confirmed = textSeen || regionChanged
+        val composerHasText = after != null && agentModeComposerHasText(text, visibleLines(after))
         return JSONObject()
-            .put("ok", true)
-            .put("confirmed", confirmed)
+            .put("ok", composerHasText)
+            .put("confirmed", composerHasText)
+            .put("composer_has_text", composerHasText)
             .put("source", AgentModeSourceOcr)
-            .put(
-                "reason",
-                when {
-                    textSeen -> AgentModeReasonOcrChanged
-                    regionChanged -> AgentModeReasonRegionChanged
-                    else -> AgentModeReasonClipboardPaste
-                },
-            )
+            .put("reason", if (composerHasText) AgentModeReasonClipboardPaste else "composer_missing")
             .put("text_input_method", method)
             .put(
                 "stdout",
-                if (confirmed) {
-                    "Replaced the composer with the user's text. Sending is a separate tap. Do not paste this text again."
+                if (composerHasText) {
+                    "The composer shows the user's text. Sending is a separate tap. Do not paste this text again."
                 } else {
-                    "Replaced the composer with the user's text. Do not paste OCR text, and do not tap send more than once."
+                    "The composer does not show the user's text."
                 },
             )
             .apply {
                 if (after != null) put("elements", elementsJson(after.elements, after.imageWidth, after.imageHeight))
+                if (after == null) put("composer_check", "capture_failed")
             }
     }
 
@@ -1921,6 +2028,7 @@ class AgentModeController(
         attachScreenshot: Boolean,
         diagnosis: JSONObject? = null,
         action: String = "tap_text",
+        allowScroll: Boolean = false,
     ): String {
         var capture = captureDisplayText(settings)
             ?: return toolError(
@@ -1929,9 +2037,10 @@ class AgentModeController(
             )
         var match = selectOcrTapTarget(capture.elements, query)
         var scrollAttempts = 0
-        // Only a missing element triggers scrolling: once it is found we tap where it is, so this
-        // can never turn into a repeat click on a target the caller already acted on.
-        while (match == null && scrollAttempts < AgentModeTextSearchMaxScrolls) {
+        val scrollBudget = if (agentModeMayScrollForLabel(query, allowScroll)) AgentModeTextSearchMaxScrolls else 0
+        // Only a missing element, and only when scrolling was requested, moves the screen.
+        // A send label never scrolls: that search walks back through chat history.
+        while (match == null && scrollAttempts < scrollBudget) {
             if (!scrollForTextSearch(settings, displayId)) break
             scrollAttempts++
             capture = captureDisplayText(settings) ?: break
@@ -1944,12 +2053,16 @@ class AgentModeController(
                     element.text.contains(query, ignoreCase = true) &&
                     !element.text.trim().equals(query, ignoreCase = true)
             }
-            val message = if (mergedLine) {
-                "The label '$query' only appears inside a merged OCR line and has no own box. Nothing was tapped."
-            } else {
-                "No element matching '$query' was found " +
-                    "(${capture.elements.size} OCR line(s) after $scrollAttempts scroll attempt(s)). " +
-                    "Nothing was tapped. These lines cannot confirm a control."
+            val message = when {
+                mergedLine ->
+                    "The label '$query' only appears inside a merged OCR line and has no own box. Nothing was tapped."
+                scrollBudget == 0 ->
+                    "No element matching '$query' was found (${capture.elements.size} OCR line(s)). " +
+                        "Nothing was tapped and the screen was not scrolled."
+                else ->
+                    "No element matching '$query' was found " +
+                        "(${capture.elements.size} OCR line(s) after $scrollAttempts scroll attempt(s)). " +
+                        "Nothing was tapped. These lines cannot confirm a control."
             }
             return JSONObject().apply {
                 put("ok", false)
@@ -2139,6 +2252,7 @@ class AgentModeController(
             }
         }
         shizukuDisplayId = null
+        emptyTreeDisplayId = null
         displayOwnerMethod = null
         displayOwnerBinder = null
         _displayState.value = AgentModeDisplayState(
