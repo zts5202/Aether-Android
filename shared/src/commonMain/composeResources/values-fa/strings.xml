@@ -672,6 +672,7 @@
     <string name="branch_steer_current_run">اجرای جریان را هدایت کنید</string>
     <string name="branch_queue_next_turn">نوبت بعدی صف</string>
     <string name="tool_invocation_group_executing">در حال اجرای %1$d ابزار</string>
+    <string name="tool_invocation_group_executing_action">%1$s · %2$d ابزار</string>
     <string name="tool_invocation_group_executed">%1$d ابزار اجرا شد</string>
     <string name="tool_invocation_collapse_tools">ابزار جمع کردن</string>
     <string name="tool_invocation_expand_tools">ابزارها را گسترش دهید</string>

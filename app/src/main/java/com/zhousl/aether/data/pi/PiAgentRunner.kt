@@ -69,6 +69,7 @@ class PiAgentRunner(
         onAssistantTextReset: suspend () -> Unit = {},
         onAssistantRequestStarted: suspend () -> Unit = {},
         onAssistantResponseReset: suspend () -> Unit = {},
+        onAssistantDone: suspend (stopReason: String, assistantText: String) -> Unit = { _, _ -> },
         onStreamingStatus: suspend (StreamingStatus?) -> Unit = {},
         pollInjectedUserMessages: suspend () -> List<LlmMessage> = { emptyList() },
     ): Result<AetherAgentTurnResult> {
@@ -340,6 +341,13 @@ class PiAgentRunner(
 
                             "assistant_request_start" -> onAssistantRequestStarted()
 
+                            "assistant_done" -> onAssistantDone(
+                                eventPayload.optString("stop_reason"),
+                                eventPayload.optString("assistant_text"),
+                            )
+
+                            "compaction_start" -> onAssistantRequestStarted()
+
                             "assistant_stream_reset" -> onAssistantResponseReset()
 
                             "assistant_retry" ->
@@ -397,12 +405,20 @@ class PiAgentRunner(
                                 if (entryId.isNotBlank()) appendedPiEntryIds += entryId
                             }
 
-                            "assistant_error" -> onStreamingStatus(
-                                StreamingStatus(
-                                    text = "Agent engine error",
-                                    detail = eventPayload.optString("error_message"),
+                            "assistant_error" -> {
+                                onAssistantDone(
+                                    "error",
+                                    eventPayload.optString("assistant_text").ifBlank {
+                                        eventPayload.optString("error_message")
+                                    },
                                 )
-                            )
+                                onStreamingStatus(
+                                    StreamingStatus(
+                                        text = "Agent engine error",
+                                        detail = eventPayload.optString("error_message"),
+                                    )
+                                )
+                            }
                         }
                     }
 

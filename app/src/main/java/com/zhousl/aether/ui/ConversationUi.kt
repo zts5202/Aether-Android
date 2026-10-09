@@ -243,13 +243,24 @@ internal fun pendingGenerationIndicator(
     lastVisibleMessageAuthor: MessageAuthor? = null,
 ): PendingGenerationIndicator = when {
     !isSending -> PendingGenerationIndicator.None
-    pendingStatusText.isNotBlank() -> PendingGenerationIndicator.Status
+    pendingStatusText.startsWith("Reconnecting", ignoreCase = true) -> PendingGenerationIndicator.Status
     hasVisiblePendingReasoning -> PendingGenerationIndicator.None
     hasVisiblePendingWork -> PendingGenerationIndicator.None
+    pendingAssistantText.isNotBlank() -> PendingGenerationIndicator.None
     lastVisibleMessageAuthor == MessageAuthor.Agent -> PendingGenerationIndicator.None
-    pendingAssistantText.isBlank() -> PendingGenerationIndicator.Thinking
-    else -> PendingGenerationIndicator.None
+    pendingStatusText.isNotBlank() -> PendingGenerationIndicator.Status
+    else -> PendingGenerationIndicator.Thinking
 }
+
+/**
+ * Assistant text stays on screen while the Agent display card is visible.
+ * The card used to replace the answer; [agentPreviewVisible] no longer hides it.
+ */
+@Suppress("UNUSED_PARAMETER")
+internal fun shouldRenderPendingAssistantText(
+    text: String,
+    agentPreviewVisible: Boolean,
+): Boolean = text.isNotBlank()
 
 internal fun shouldRenderPendingGenerationBlock(
     isSending: Boolean,
@@ -1555,13 +1566,8 @@ private fun PendingAssistantTimeline(
             (blockChromeInvocations.isNotEmpty() ||
                 pendingChromeInvocations.isNotEmpty() ||
                 chromeDisplayState.latestPreviewPath.isNotBlank())
-    val firstAgentModeBlockIndex = blocks.firstAgentModeBlockIndex().let { index ->
-        if (index >= 0) index else if (agentModePreviewVisible) blocks.size else -1
-    }
     val agentModeOverlayText = if (agentModePreviewVisible) {
-        blocks.lastTextBlockAfterAgentMode().orEmpty().ifBlank {
-            blocks.latestReasoningStatusAfterTool { it.isAgentModeDisplayInvocation() }
-        }
+        blocks.latestReasoningStatusAfterTool { it.isAgentModeDisplayInvocation() }
     } else {
         ""
     }
@@ -1595,6 +1601,7 @@ private fun PendingAssistantTimeline(
                 onAttachSurface = onAttachAgentModePreviewSurface,
                 onDetachSurface = onDetachAgentModePreviewSurface,
             )
+            RunningToolActionLine(blockAgentModeInvocations + pendingAgentModeInvocations)
         } else if (!chromePreviewVisible && visiblePendingInvocations.isNotEmpty()) {
             val pendingToolsStartedAtMillis = visiblePendingInvocations
                 .mapNotNull { it.startedAtMillis.takeIf { timestamp -> timestamp > 0L } }
@@ -1656,10 +1663,7 @@ private fun PendingAssistantTimeline(
             onAttachSurface = onAttachAgentModePreviewSurface,
             onDetachSurface = onDetachAgentModePreviewSurface,
         )
-        return
-    }
-    if (chromePreviewVisible) {
-        return
+        RunningToolActionLine(blockAgentModeInvocations + pendingAgentModeInvocations)
     }
 
     val workStartedAtMillis = listOfNotNull(
@@ -1699,24 +1703,11 @@ private fun PendingAssistantTimeline(
             title = formatWorkedSummaryTitle(workingDurationMillis),
         )
         blocks.forEachIndexed { index, block ->
-            if (agentModePreviewVisible && index == firstAgentModeBlockIndex) {
-                AgentModePreviewPanel(
-                    displayState = agentModeDisplayState,
-                    toolInvocation = (blockAgentModeInvocations + pendingAgentModeInvocations).lastOrNull()
-                        ?: pendingToolInvocations.lastOrNull(),
-                    overlayText = agentModeOverlayText,
-                    workspaceDirectory = workspaceDirectory,
-                    allowRootImageRead = allowRootImageRead,
-                    onOpenLink = onOpenLink,
-                    onAttachSurface = onAttachAgentModePreviewSurface,
-                    onDetachSurface = onDetachAgentModePreviewSurface,
-                )
-            }
             PendingAssistantTimelineBlock(
                 block = block,
                 index = index,
                 isLastBlock = index == blocks.lastIndex,
-                agentModePreviewVisible = false,
+                agentModePreviewVisible = agentModePreviewVisible,
                 workspaceDirectory = workspaceDirectory,
                 allowRootImageRead = allowRootImageRead,
                 onOpenLink = onOpenLink,
@@ -1728,6 +1719,21 @@ private fun PendingAssistantTimeline(
             )
         }
     }
+}
+
+@Composable
+private fun RunningToolActionLine(invocations: List<ChatToolInvocation>) {
+    val label = currentRunningToolLabel(invocations)
+    if (label.isBlank()) return
+    val text = if (invocations.size > 1) {
+        stringResource(R.string.tool_invocation_group_executing_action, label, invocations.size)
+    } else {
+        label
+    }
+    ShimmerStatusText(
+        text = text,
+        modifier = Modifier.padding(top = 6.dp),
+    )
 }
 
 @Composable
@@ -1747,7 +1753,7 @@ private fun PendingAssistantTimelineBlock(
 ) {
     when (block) {
         is AssistantResponseBlock.Text -> {
-            if (!agentModePreviewVisible) {
+            if (shouldRenderPendingAssistantText(block.text, agentModePreviewVisible)) {
                 PendingAssistantResponseBlock(
                     text = block.text,
                     workspaceDirectory = workspaceDirectory,
@@ -1824,20 +1830,6 @@ private fun ChatToolInvocation.isAgentModeDisplayInvocation(): Boolean =
 
 private fun ChatToolInvocation.isChromeDisplayInvocation(): Boolean =
     toolName.equals("chrome", ignoreCase = true) || toolName.equals("browser", ignoreCase = true)
-
-private fun List<AssistantResponseBlock>.firstAgentModeBlockIndex(): Int =
-    indexOfFirst { it.agentModeToolInvocations().isNotEmpty() }
-
-private fun List<AssistantResponseBlock>.lastTextBlockAfterAgentMode(): String? {
-    val firstAgentModeBlockIndex = firstAgentModeBlockIndex()
-    if (firstAgentModeBlockIndex < 0) {
-        return null
-    }
-    return drop(firstAgentModeBlockIndex + 1)
-        .filterIsInstance<AssistantResponseBlock.Text>()
-        .lastOrNull { it.text.isNotBlank() }
-        ?.text
-}
 
 private fun List<AssistantResponseBlock>.latestReasoningStatusAfterTool(
     predicate: (ChatToolInvocation) -> Boolean,

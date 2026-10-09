@@ -200,6 +200,26 @@ class ConversationUiTest {
     }
 
     @Test
+    fun pendingIndicatorHidesThinkingStatusWhenAssistantTextIsVisible() {
+        assertEquals(
+            PendingGenerationIndicator.None,
+            pendingGenerationIndicator(
+                isSending = true,
+                pendingAssistantText = "你好，我可以打开相册。",
+                pendingStatusText = "Thinking",
+                lastVisibleMessageAuthor = MessageAuthor.User,
+            ),
+        )
+    }
+
+    @Test
+    fun pendingAssistantTextStaysVisibleBehindAgentPreview() {
+        assertEquals(true, shouldRenderPendingAssistantText("打开 ChatGPT", agentPreviewVisible = true))
+        assertEquals(true, shouldRenderPendingAssistantText("打开 ChatGPT", agentPreviewVisible = false))
+        assertEquals(false, shouldRenderPendingAssistantText("  ", agentPreviewVisible = true))
+    }
+
+    @Test
     fun pendingIndicatorShowsStatusWhenStatusTextExists() {
         assertEquals(
             PendingGenerationIndicator.Status,
