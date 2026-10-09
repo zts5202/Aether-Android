@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.annotation.Keep
 import com.zhousl.aether.data.AgentModeSourceAccessibility
 
@@ -50,7 +51,19 @@ class AetherAgentModeAccessibilityService : AccessibilityService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             return AgentModeWindowBatch(emptyList())
         }
+        val first = windowsForRequestedDisplay(displayId, windowsOnAllDisplays)
+            ?: return AgentModeWindowBatch(emptyList())
+        if (first.windows.isEmpty() || first.windows.any(::windowHasRoot)) return first
+        first.windows.forEach { runCatching { it.recycle() } }
+        android.os.SystemClock.sleep(200)
         return windowsForRequestedDisplay(displayId, windowsOnAllDisplays)
+            ?: AgentModeWindowBatch(emptyList())
+    }
+
+    private fun windowHasRoot(window: AccessibilityWindowInfo): Boolean {
+        val root = window.root ?: return false
+        runCatching { root.recycle() }
+        return true
     }
 
     companion object {

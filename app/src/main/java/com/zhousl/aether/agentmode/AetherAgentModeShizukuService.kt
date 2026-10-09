@@ -348,14 +348,22 @@ class AetherAgentModeShizukuService @Keep constructor(
 
     private fun pasteText(displayId: Int, text: String) {
         clipboardManager.setPrimaryClip(ClipData.newPlainText("Aether Agent Mode", text))
+        // Select the current field contents first so paste replaces them instead of appending.
+        pressKey(displayId, KeyEvent.KEYCODE_MOVE_END)
+        pressKey(displayId, KeyEvent.KEYCODE_MOVE_HOME, KeyEvent.META_SHIFT_ON)
+        pressKey(displayId, KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON)
+        pressKey(displayId, KeyEvent.KEYCODE_PASTE)
+    }
+
+    private fun pressKey(displayId: Int, keyCode: Int, metaState: Int = 0) {
         val downTime = SystemClock.uptimeMillis()
         injectKeyEvent(
             displayId = displayId,
             downTime = downTime,
             eventTime = downTime,
             action = KeyEvent.ACTION_DOWN,
-            keyCode = KeyEvent.KEYCODE_PASTE,
-            metaState = 0,
+            keyCode = keyCode,
+            metaState = metaState,
         )
         SystemClock.sleep(KeyPressDurationMillis)
         injectKeyEvent(
@@ -363,8 +371,8 @@ class AetherAgentModeShizukuService @Keep constructor(
             downTime = downTime,
             eventTime = SystemClock.uptimeMillis(),
             action = KeyEvent.ACTION_UP,
-            keyCode = KeyEvent.KEYCODE_PASTE,
-            metaState = 0,
+            keyCode = keyCode,
+            metaState = metaState,
         )
     }
 
@@ -610,12 +618,34 @@ class AetherAgentModeShizukuService @Keep constructor(
     private fun automationWindows(displayId: Int): AgentModeWindowBatch? {
         val automation = uiAutomationOrNull() ?: return null
         return runCatching {
-            automation.clearCache()
-            windowsForRequestedDisplay(displayId, automation.windowsOnAllDisplays)
+            readAutomationWindows(automation, displayId)
         }.getOrElse {
             disconnectUiAutomation()
             null
         }
+    }
+
+    /**
+     * Virtual-display windows sometimes appear before their roots are populated. One idle wait
+     * and a cache clear is enough to tell an empty WeChat tree from a tree that is still loading.
+     */
+    private fun readAutomationWindows(automation: UiAutomation, displayId: Int): AgentModeWindowBatch {
+        automation.clearCache()
+        runCatching { automation.waitForIdle(250, 800) }
+        val first = windowsForRequestedDisplay(displayId, automation.windowsOnAllDisplays)
+            ?: return AgentModeWindowBatch(emptyList())
+        if (first.windows.isEmpty() || first.windows.any(::windowHasRoot)) return first
+        first.windows.forEach { runCatching { it.recycle() } }
+        runCatching { automation.waitForIdle(400, 1_200) }
+        automation.clearCache()
+        return windowsForRequestedDisplay(displayId, automation.windowsOnAllDisplays)
+            ?: AgentModeWindowBatch(emptyList())
+    }
+
+    private fun windowHasRoot(window: AccessibilityWindowInfo): Boolean {
+        val root = window.root ?: return false
+        runCatching { root.recycle() }
+        return true
     }
 
     private fun uiAutomationOrNull(): UiAutomation? {

@@ -92,6 +92,7 @@ import {
   loadAetherAppExtensions,
 } from "./aether-extensions.js";
 import { agentDisplayContextExtensionFactory } from "./agent-display-context.js";
+import { AGENT_MODE_LOOP_STOP_MESSAGE, AgentModeLoopGuard } from "./agent-mode-loop-guard.js";
 import { bridgeDebug, bridgeDebugEnabled, bridgeDiagnostic, elapsedMillis } from "./debug.js";
 import { reserveProtocolStdout, writeProtocolFrame } from "./protocol-output.js";
 
@@ -180,6 +181,8 @@ interface AgentSessionState {
   runtime: "alpine" | "termux";
   platform: "android" | "ios";
   chromeEnabled: boolean;
+  agentModeEnabled: boolean;
+  loopGuard: AgentModeLoopGuard;
   modelRuntime: ModelRuntime;
   model: Model<string>;
   compatibilityFallbackState: CompatibilityFallbackState;
@@ -1910,7 +1913,7 @@ function createAgentHostToolDefinition(
   state: AgentSessionState,
   definition: HostToolDefinition,
 ): ToolDefinition<any, any, any> {
-  return {
+  return guardAgentModeTool(state, {
     name: definition.name,
     label: definition.name,
     description: definition.description,
@@ -1918,7 +1921,47 @@ function createAgentHostToolDefinition(
     executionMode: definition.execution_mode,
     execute: (toolCallId, args, signal, onUpdate) =>
       requestAgentHostTool(state, definition, toolCallId, args, signal, onUpdate),
+  });
+}
+
+function guardAgentModeTool(
+  state: AgentSessionState,
+  tool: ToolDefinition<any, any, any>,
+): ToolDefinition<any, any, any> {
+  const execute = tool.execute;
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      const argsJson = JSON.stringify(params ?? {});
+      if (state.agentModeEnabled) {
+        const decision = state.loopGuard.beforeCall(tool.name, argsJson);
+        if (decision.stop) {
+          return {
+            content: [{ type: "text", text: decision.message }],
+            details: { loop_stopped: true },
+            terminate: true,
+          };
+        }
+      }
+      const result = await execute(toolCallId, params, signal, onUpdate, ctx);
+      if (state.agentModeEnabled) {
+        const after = state.loopGuard.afterResult(tool.name, argsJson, toolTextOutput(result));
+        if (after.stop) {
+          return {
+            ...result,
+            content: [...result.content, { type: "text", text: `\n${AGENT_MODE_LOOP_STOP_MESSAGE}` }],
+            terminate: true,
+          };
+        }
+      }
+      return result;
+    },
   };
+}
+
+function payloadEnablesAgentMode(payload: JsonObject, platform: "android" | "ios"): boolean {
+  return allowedHostToolDefinitions(payload.host_tools, platform)
+    .some((tool) => tool.name === "agent_display");
 }
 
 function requestRuntimeOperation(
@@ -2589,6 +2632,8 @@ async function createNativeAgentSession(
     runtime,
     platform,
     chromeEnabled: platform === "android" && asBoolean(payload.chrome_enabled, false),
+    agentModeEnabled: payloadEnablesAgentMode(payload, platform),
+    loopGuard: new AgentModeLoopGuard(),
     modelRuntime: built.modelRuntime,
     model: built.model,
     compatibilityFallbackState: built.compatibilityFallbackState,
@@ -2604,7 +2649,7 @@ async function createNativeAgentSession(
     lastAccessedAt: Date.now(),
   } satisfies AgentSessionState;
   const customTools = [
-    ...nativeToolDefinitions(state),
+    ...nativeToolDefinitions(state).map((tool) => guardAgentModeTool(state, tool)),
     ...allowedHostToolDefinitions(payload.host_tools, platform).map((tool) =>
       createAgentHostToolDefinition(state, tool),
     ),
@@ -2880,6 +2925,7 @@ async function prepareNativeAgentSession(
   }
   existing.lastAccessedAt = Date.now();
   existing.chromeEnabled = platform === "android" && asBoolean(payload.chrome_enabled, false);
+  existing.agentModeEnabled = payloadEnablesAgentMode(payload, platform);
   setActiveSessionTools(existing);
   return { state: existing, reused: true };
 }
@@ -2891,6 +2937,7 @@ async function runNativeAgentPrompt(
   images: ImageContent[],
 ): Promise<{ message: AssistantMessage; turnUsage: JsonObject }> {
   state.currentRequestId = id;
+  state.loopGuard.reset();
   const startedAt = Date.now();
   state.lastAccessedAt = startedAt;
   activeAborters.set(id, () => state.session.abort());
@@ -2950,6 +2997,7 @@ async function steerNativeAgentSession(payload: JsonObject): Promise<JsonObject>
 async function followUpNativeAgentSession(id: string, payload: JsonObject): Promise<JsonObject> {
   const state = agentSessions.get(asString(payload.session_id).trim());
   if (!state) throw new Error(`Unknown Pi session: ${asString(payload.session_id)}`);
+  state.loopGuard.reset();
   const prompt = nativeBridgePrompt(payload.message);
   if (state.session.isStreaming) {
     await state.session.followUp(prompt.text, prompt.images);

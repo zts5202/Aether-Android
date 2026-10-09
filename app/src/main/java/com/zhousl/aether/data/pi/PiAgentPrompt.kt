@@ -38,9 +38,13 @@ internal fun buildPiAgentInstructions(
                 "Prefer find_and_tap, find_and_input, and tap_node over raw coordinates. " +
                 "Do not guess the same area again after a miss; two failures on the same target stop the next attempt. " +
                 "Do not convert screenshot pixels or guess a y near the composer. OCR results already include bbox_norm, and the app taps that box center. " +
+                "A word inside a merged line has its own element box. Tap that word, not the line. " +
                 "Routine taps and typing do not include a screenshot. Pass include_screenshot only when the image is needed, or call action=screenshot. " +
                 "If accessibility_hint is present, the accessibility service is off or restricted: keep using find_and_input and find_and_tap. " +
-                "clipboard_paste means the text was already sent."
+                "sources_tried lists each tree source. An empty tree is unavailable and falls through to the next source, then OCR. " +
+                "The text argument is only the user's message, never OCR text. clipboard_paste means the composer was replaced, not that the message was sent. " +
+                "A send-like tap returns status uncertain when the chat did not clearly change. Take one screenshot to check. Do not tap or type it again. " +
+                "Do not re-read logs or repeat the same check. If a tool says it stopped for no progress, tell the user the current state and stop."
         )
     }
     if (chromeEnabled) {

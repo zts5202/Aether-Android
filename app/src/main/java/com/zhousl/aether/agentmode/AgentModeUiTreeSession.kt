@@ -12,7 +12,9 @@ import com.zhousl.aether.data.AgentModeReasonActionClick
 import com.zhousl.aether.data.AgentModeReasonActionSetText
 import com.zhousl.aether.data.AgentModeReasonClipboardPaste
 import com.zhousl.aether.data.AgentModeReasonDisplayNotInTree
+import com.zhousl.aether.data.AgentModeReasonEmptyTree
 import com.zhousl.aether.data.AgentModeReasonOtherDisplay
+import com.zhousl.aether.data.agentModeTreeHasControls
 import com.zhousl.aether.data.AgentModeReasonFocusChanged
 import com.zhousl.aether.data.AgentModeReasonNodeNotFound
 import com.zhousl.aether.data.AgentModeReasonNotConfirmed
@@ -112,6 +114,16 @@ internal class AgentModeUiTreeSession(
         }
         val windows = batch.windows
         val collected = collect(windows)
+        if (!agentModeTreeHasControls(collected.map { it.draft })) {
+            val count = collected.size
+            windows.forEach { runCatching { it.recycle() } }
+            collected.forEach { runCatching { it.info.recycle() } }
+            return jsonFailure(
+                available = false,
+                reason = AgentModeReasonEmptyTree,
+                message = "Display $displayId has windows but no interactive controls.",
+            ).put("candidate_count", count).put("nodes", JSONArray())
+        }
         windows.forEach { runCatching { it.recycle() } }
         return try {
             block(collected)
@@ -545,6 +557,7 @@ internal class AgentModeUiTreeSession(
         val collected = mutableListOf<Collected>()
         for (window in windows) {
             val root = window.root ?: continue
+            root.refresh()
             walk(root, parentIndex = -1, collected)
         }
         return collected

@@ -255,10 +255,13 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
             "A successful tree read returns nodes (at most 20, serialized to at most 1500 characters). Each node has id, type, text, editable, and center [x, y] in 0..1000. " +
             "source is ui_automation, accessibility_service, or ocr. Nodes, nearby nodes, and focus come only from the Agent Mode display. " +
             "accessibility_hint means the accessibility service is off or restricted. Do not guess coordinates. " +
-            "find_and_input uses the control's set-text action when an editable node exists, otherwise clipboard paste on this display. Do not use shell input text. clipboard_paste means the text was already sent. " +
+            "find_and_input clears and replaces the field: set-text when an editable node exists, otherwise clipboard paste on this display. Do not use shell input text. clipboard_paste means the composer was replaced, not that the message was sent. Pass only the user's message, never an OCR line. " +
             "screenshot always attaches an image. tap, swipe, key, text, tap_text, find_and_tap, find_and_input, and tap_node omit the image unless include_screenshot is true; the result then has screenshot_omitted=\"not_requested\". " +
-            "OCR lines use text and bbox_norm = [left, top, right, bottom] in 0..1000. find_and_tap and tap_text tap that box center in the app. Do not convert screenshot pixels. " +
-            "Success is the control action, a focus or text change, region_changed, or ocr_text_changed.",
+            "An empty control tree is unavailable. sources_tried lists ui_automation, then accessibility_service, then ocr. " +
+            "OCR elements use text, granularity, and bbox_norm = [left, top, right, bottom] in 0..1000. find_and_tap and tap_text tap the exact word's box center, not a merged line. Do not convert screenshot pixels. " +
+            "A send-like tap is confirmed only when the composer clears or the message appears as a new bubble. Otherwise status is uncertain: take one screenshot and do not tap or type again. " +
+            "Do not re-read logs. Repeating the same check with no progress stops the turn. " +
+            "Success is the control action, a focus or text change, region_changed, ocr_text_changed, composer_cleared, or message_bubble.",
     )
     put(
         "parameters",
@@ -290,8 +293,8 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
                     put(
                         "text",
                         stringProperty(
-                            "For text and find_and_input: text to insert, including Chinese. " +
-                                "find_and_input uses set-text when an editable node exists, otherwise clipboard paste. Do not tap the field first.",
+                            "For text and find_and_input: only the user's message, including Chinese, never text copied from OCR. " +
+                                "The field is cleared and replaced. Sending is a separate tap. Do not tap the field first.",
                         ),
                     )
                 },
