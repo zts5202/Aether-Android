@@ -68,5 +68,9 @@ class PiAgentPromptTest {
         assertTrue(enabled.contains("same area"))
         assertFalse(enabled.contains("pixel_x / image_width"))
         assertTrue(enabled.contains("accessibility_hint"))
+        assertTrue(enabled.contains("You can operate this phone"))
+        assertTrue(enabled.contains("open the gallery"))
+        assertTrue(enabled.contains("Still refuse requests that are unsafe or disallowed"))
+        assertFalse(disabled.contains("You can operate this phone"))
     }
 }

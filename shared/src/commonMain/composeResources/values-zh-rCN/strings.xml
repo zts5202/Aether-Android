@@ -696,6 +696,7 @@
     <string name="branch_steer_current_run">引导当前运行</string>
     <string name="branch_queue_next_turn">排队下一轮</string>
     <string name="tool_invocation_group_executing">正在执行 %1$d 个工具</string>
+    <string name="tool_invocation_group_executing_action">%1$s · %2$d 个工具</string>
     <string name="tool_invocation_group_executed">已执行 %1$d 个工具</string>
     <string name="tool_invocation_collapse_tools">折叠工具</string>
     <string name="tool_invocation_expand_tools">展开工具</string>

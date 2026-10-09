@@ -518,7 +518,7 @@ class SessionExecutionManager(
                     handle = handle,
                     request = nextRequest,
                 )
-                if (handle.pauseRequested) break
+                if (handle.pauseRequested || handle.watchdogSummary != null) break
                 promoteRemainingSteersToQueue(handle)
                 if (handle.pauseRequested) break
 
@@ -582,6 +582,7 @@ class SessionExecutionManager(
             )
         }
         var firstAssistantTokenAtMillis: Long? = null
+        var turnWatchdog: Job? = null
         diagnosticLogger.event(
             category = "session",
             event = "turn_start",
@@ -659,13 +660,68 @@ class SessionExecutionManager(
             }
             val reasoningTraceToolRoutingEnabled = request.settings.supportsVisibleReasoningTrace()
             var providerRequestCheckpoint: ProviderRequestCheckpoint? = null
+            val turnActivity = AgentTurnActivity(nowMillis = turnStartedAtMillis)
             val emitToolEvent: suspend (AgentToolEvent) -> Unit = { event ->
+                turnActivity.noteActivity()
                 if (!handle.pauseRequested) {
                     handleToolEvent(
                         handle = handle,
                         event = event,
                         reasoningTraceToolRoutingEnabled = reasoningTraceToolRoutingEnabled,
                     )
+                }
+            }
+            turnWatchdog = scope.launch {
+                while (isActive && !handle.pauseRequested) {
+                    delay(1_000)
+                    if (handle.pauseRequested) break
+                    val toolRunning = _executionStates.value[handle.sessionId]
+                        ?.pendingToolInvocations
+                        ?.any { it.isRunning } == true
+                    val reason = turnActivity.shouldAbort(toolInProgress = toolRunning) ?: continue
+                    turnActivity.markAborted(reason)
+                    if (reason == "silence") {
+                        appendSilenceStop(handle)
+                    }
+                    piKernelBridge.abortSession(handle.sessionId)
+                    delay(AgentTurnAbortGraceMillis)
+                    if (!isActive || handle.pauseRequested || handle.pauseFinalized) break
+                    val claimed = synchronized(handle.lock) {
+                        if (
+                            handle.bridgeReturned ||
+                            handle.watchdogClaimed ||
+                            handle.pauseRequested ||
+                            handle.pauseFinalized
+                        ) {
+                            false
+                        } else {
+                            handle.watchdogClaimed = true
+                            true
+                        }
+                    }
+                    if (!claimed) break
+                    val summary = commitWatchdogTurn(
+                        handle = handle,
+                        request = request,
+                        turnStartedAtMillis = turnStartedAtMillis,
+                        firstTokenAtMillis = firstAssistantTokenAtMillis,
+                        reason = reason,
+                    )
+                    handle.watchdogSummary = summary
+                    updateExecutionState(handle.sessionId) { current ->
+                        current.copy(
+                            isRunning = false,
+                            pendingToolInvocations = emptyList(),
+                            pendingResponseBlocks = emptyList(),
+                            pendingAssistantText = "",
+                            pendingStatusText = "",
+                            pendingStatusDetail = "",
+                            activeTurnStartedAtMillis = null,
+                        )
+                    }
+                    _turnEvents.tryEmit(summary.toTurnEvent(handle.sessionId))
+                    handle.job?.cancel(CancellationException("Agent turn ended."))
+                    break
                 }
             }
 
@@ -707,6 +763,7 @@ class SessionExecutionManager(
                 onToolEvent = emitToolEvent,
                 onToolProgress = emitToolEvent,
                 onAssistantReasoningDelta = { delta ->
+                    turnActivity.noteActivity()
                     if (handle.pauseRequested) return@runTurn
                     if (request.settings.reasoningEffort == "off") return@runTurn
                     if (delta.isEmpty()) return@runTurn
@@ -726,6 +783,7 @@ class SessionExecutionManager(
                     )
                 },
                 onAssistantTextDelta = { delta ->
+                    turnActivity.noteActivity()
                     if (handle.pauseRequested) return@runTurn
                     if (delta.isEmpty()) return@runTurn
                     if (firstAssistantTokenAtMillis == null) {
@@ -759,7 +817,14 @@ class SessionExecutionManager(
                         }
                     }
                 },
+                onAssistantDone = { stopReason, assistantText ->
+                    turnActivity.noteTerminalStop(stopReason)
+                    if (!handle.pauseRequested) {
+                        applyAssistantDoneText(handle, assistantText)
+                    }
+                },
                 onAssistantRequestStarted = {
+                    turnActivity.noteActivity()
                     if (!handle.pauseRequested) {
                         val current = _executionStates.value[handle.sessionId]
                             ?: SessionExecutionState(sessionId = handle.sessionId)
@@ -781,6 +846,10 @@ class SessionExecutionManager(
                     }
                 },
                 onStreamingStatus = { status ->
+                    val statusText = status?.text.orEmpty()
+                    val terminalError = statusText.startsWith("Agent engine error")
+                    if (status != null && !terminalError) turnActivity.noteActivity()
+                    if (terminalError) turnActivity.noteTerminalStop("error")
                     if (handle.pauseRequested) return@runTurn
                     if (status?.text?.startsWith("Reconnecting", ignoreCase = true) == true) {
                         completeActiveReasoning(
@@ -845,6 +914,17 @@ class SessionExecutionManager(
                     snapshot = _executionStates.value[handle.sessionId] ?: SessionExecutionState(sessionId = handle.sessionId),
                 )
             }
+            val claimedBridgeResult = synchronized(handle.lock) {
+                if (handle.watchdogClaimed) {
+                    false
+                } else {
+                    handle.bridgeReturned = true
+                    true
+                }
+            }
+            if (!claimedBridgeResult) {
+                return awaitWatchdogSummary(handle)
+            }
 
             completeActiveReasoning(
                 handle = handle,
@@ -870,6 +950,7 @@ class SessionExecutionManager(
                     val visibleThoughtDurationMillis = thoughtDurationMillis.takeIf {
                         request.settings.reasoningEffort != "off"
                     }
+                    val keepStreamedBlocks = turnActivity.endReason == "silence"
                     diagnosticLogger.event(
                         category = "session",
                         event = "turn_model_success",
@@ -882,10 +963,14 @@ class SessionExecutionManager(
                     )
                     appendAgentMessage(
                         sessionId = handle.sessionId,
-                        blocks = ensureAssistantResponseFinalText(
-                            blocks = responseBlocks,
-                            finalText = turnResult.assistantText,
-                        ) { handle.nextPendingBlockId("agent-text") },
+                        blocks = if (keepStreamedBlocks) {
+                            responseBlocks
+                        } else {
+                            ensureAssistantResponseFinalText(
+                                blocks = responseBlocks,
+                                finalText = turnResult.assistantText,
+                            ) { handle.nextPendingBlockId("agent-text") }
+                        },
                         thoughtDurationMillis = visibleThoughtDurationMillis,
                         outcome = SessionTurnOutcome.Success,
                         tokenUsage = resolvedTokenUsage,
@@ -905,6 +990,7 @@ class SessionExecutionManager(
                     )
                 },
                 onFailure = { throwable ->
+                    val watchedEnd = turnActivity.endReason
                     val responseBlocks = currentAssistantResponseBlocks(handle.sessionId).let { blocks ->
                         if (request.settings.reasoningEffort == "off") {
                             blocks.sanitizedForReasoningOff()
@@ -914,6 +1000,34 @@ class SessionExecutionManager(
                     }
                     val visibleThoughtDurationMillis = thoughtDurationMillis.takeIf {
                         request.settings.reasoningEffort != "off"
+                    }
+                    if (watchedEnd == "silence" || watchedEnd == "settled") {
+                        val snapshot = _executionStates.value[handle.sessionId]
+                        return@fold appendAgentMessage(
+                            sessionId = handle.sessionId,
+                            blocks = responseBlocks.ifEmpty {
+                                listOf(
+                                    AssistantResponseBlock.Text(
+                                        id = handle.nextPendingBlockId("agent-text"),
+                                        text = watchdogFallbackText(
+                                            reason = watchedEnd,
+                                            statusText = snapshot?.pendingStatusText.orEmpty(),
+                                            statusDetail = snapshot?.pendingStatusDetail.orEmpty(),
+                                        ),
+                                    )
+                                )
+                            },
+                            thoughtDurationMillis = visibleThoughtDurationMillis,
+                            outcome = SessionTurnOutcome.Success,
+                            tokenUsage = estimatedTokenUsage,
+                            tokenUsageSource = "estimated",
+                            turnStartedAtMillis = turnStartedAtMillis,
+                            firstTokenAtMillis = firstAssistantTokenAtMillis,
+                            turnCompletedAtMillis = System.currentTimeMillis(),
+                            inputMessageCount = request.requestMessages.size,
+                            userMessageCount = request.requestMessages.count { it.author == MessageAuthor.User },
+                            handle = handle,
+                        )
                     }
                     diagnosticLogger.exception(
                         category = "session",
@@ -977,6 +1091,9 @@ class SessionExecutionManager(
             )
             completion
         } catch (_: CancellationException) {
+            if (handle.watchdogClaimed) {
+                return awaitWatchdogSummary(handle)
+            }
             diagnosticLogger.event(
                 category = "session",
                 event = "turn_cancelled",
@@ -1009,6 +1126,7 @@ class SessionExecutionManager(
             }
             completion
         } finally {
+            turnWatchdog?.cancel()
             if (executionHandles[handle.sessionId] === handle) {
                 updateExecutionState(handle.sessionId) { current ->
                     current.copy(
@@ -1479,6 +1597,118 @@ class SessionExecutionManager(
 
     private fun currentAssistantResponseBlocks(sessionId: String): List<AssistantResponseBlock> =
         _executionStates.value[sessionId]?.pendingResponseBlocks.orEmpty()
+
+    private fun applyAssistantDoneText(
+        handle: SessionExecutionHandle,
+        assistantText: String,
+    ) {
+        updateExecutionState(handle.sessionId) { current ->
+            val delta = mergeAssistantDoneText(
+                existingTextBlocks = current.pendingResponseBlocks.mapNotNull { block ->
+                    (block as? AssistantResponseBlock.Text)?.text
+                },
+                assistantText = assistantText,
+            ) ?: return@updateExecutionState current
+            val pendingResponseBlocks = appendAssistantResponseText(
+                blocks = current.pendingResponseBlocks,
+                delta = delta,
+            ) { handle.nextPendingBlockId("pending-text") }
+            current.copy(
+                pendingStatusText = "",
+                pendingStatusDetail = "",
+                pendingAssistantText = pendingTrailingAssistantText(pendingResponseBlocks),
+                pendingResponseBlocks = pendingResponseBlocks,
+            )
+        }
+    }
+
+    private fun commitWatchdogTurn(
+        handle: SessionExecutionHandle,
+        request: SessionTurnRequest,
+        turnStartedAtMillis: Long,
+        firstTokenAtMillis: Long?,
+        reason: String,
+    ): CompletionSummary {
+        completeActiveReasoning(
+            handle = handle,
+            trigger = ReasoningCompletionTrigger.TurnFinished,
+        )
+        val snapshot = _executionStates.value[handle.sessionId]
+        val responseBlocks = currentAssistantResponseBlocks(handle.sessionId).let { blocks ->
+            if (request.settings.reasoningEffort == "off") {
+                blocks.sanitizedForReasoningOff()
+            } else {
+                blocks
+            }
+        }
+        val thoughtDurationMillis = (System.currentTimeMillis() - turnStartedAtMillis).coerceAtLeast(0L)
+        return appendAgentMessage(
+            sessionId = handle.sessionId,
+            blocks = responseBlocks.ifEmpty {
+                listOf(
+                    AssistantResponseBlock.Text(
+                        id = handle.nextPendingBlockId("agent-text"),
+                        text = watchdogFallbackText(
+                            reason = reason,
+                            statusText = snapshot?.pendingStatusText.orEmpty(),
+                            statusDetail = snapshot?.pendingStatusDetail.orEmpty(),
+                        ),
+                    )
+                )
+            },
+            thoughtDurationMillis = thoughtDurationMillis.takeIf {
+                request.settings.reasoningEffort != "off"
+            },
+            outcome = SessionTurnOutcome.Success,
+            tokenUsage = estimateRequestTokenUsage(request),
+            tokenUsageSource = "estimated",
+            turnStartedAtMillis = turnStartedAtMillis,
+            firstTokenAtMillis = firstTokenAtMillis,
+            turnCompletedAtMillis = System.currentTimeMillis(),
+            inputMessageCount = request.requestMessages.size,
+            userMessageCount = request.requestMessages.count { it.author == MessageAuthor.User },
+            handle = handle,
+        )
+    }
+
+    private suspend fun awaitWatchdogSummary(handle: SessionExecutionHandle): CompletionSummary {
+        repeat(40) {
+            handle.watchdogSummary?.let { return it }
+            delay(50)
+        }
+        return CompletionSummary(
+            sessionTitle = resolveSessionTitle(handle.sessionId),
+            summary = "",
+            outcome = SessionTurnOutcome.Success,
+            toolCallCount = 0,
+            distinctToolCount = 0,
+            toolNames = emptyList(),
+            durationMillis = null,
+        )
+    }
+
+    private fun appendSilenceStop(handle: SessionExecutionHandle) {
+        updateExecutionState(handle.sessionId) { current ->
+            val pendingResponseBlocks = appendAssistantResponseText(
+                blocks = current.pendingResponseBlocks,
+                delta = buildString {
+                    if (current.pendingResponseBlocks.any {
+                            it is AssistantResponseBlock.Text && it.text.isNotBlank()
+                        }
+                    ) {
+                        append("\n\n")
+                    }
+                    append(AgentTurnSilenceMessage)
+                },
+            ) { handle.nextPendingBlockId("agent-text") }
+            current.copy(
+                pendingStatusText = "",
+                pendingStatusDetail = "",
+                pendingAssistantText = pendingTrailingAssistantText(pendingResponseBlocks),
+                pendingResponseBlocks = pendingResponseBlocks,
+            )
+        }
+    }
 
     private fun finalizePausedTurn(
         handle: SessionExecutionHandle,
@@ -3003,6 +3233,15 @@ class SessionExecutionManager(
 
         @Volatile
         var job: Job? = null
+
+        @Volatile
+        var bridgeReturned: Boolean = false
+
+        @Volatile
+        var watchdogClaimed: Boolean = false
+
+        @Volatile
+        var watchdogSummary: CompletionSummary? = null
 
         fun nextPendingBlockId(prefix: String): String {
             val nextId = pendingBlockCounter

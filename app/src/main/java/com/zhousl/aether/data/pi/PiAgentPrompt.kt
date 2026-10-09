@@ -33,7 +33,8 @@ internal fun buildPiAgentInstructions(
     )
     if (agentModeEnabled) {
         append(
-            "\n\nAgent Mode is enabled for this chat. Use agent_display only when operating the isolated Android virtual display is required. " +
+            "\n\nAgent Mode is enabled for this chat. You can operate this phone through agent_display: open apps, open the gallery, pick a photo from an album, and upload or send it. Do not refuse those tasks as something you cannot do. Still refuse requests that are unsafe or disallowed. " +
+                "Use agent_display only when operating the isolated Android virtual display is required. " +
                 "Sending a chat message is launch, then find_and_input, then find_and_tap on the send label. Do not take a screenshot for those steps. " +
                 "launch returns the new screen's OCR elements and omits the image unless include_screenshot is true. Next, find_and_tap the label. Do not take a screenshot first. " +
                 "Prefer find_and_tap, find_and_input, and tap_node over raw coordinates. " +

@@ -1579,7 +1579,7 @@ fun ToolInvocationList(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         AnimatedVisibility(
-            visible = headerVisible,
+            visible = headerVisible || isRunning,
             enter = fadeIn(
                 animationSpec = tween(
                     durationMillis = ToolTransitionDurationMillis - 100,
@@ -1604,8 +1604,17 @@ fun ToolInvocationList(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (isRunning) {
+                    val runningLabel = currentRunningToolLabel(toolInvocations)
                     ShimmerStatusText(
-                        text = stringResource(R.string.tool_invocation_group_executing, toolInvocations.size),
+                        text = if (runningLabel.isBlank()) {
+                            stringResource(R.string.tool_invocation_group_executing, toolInvocations.size)
+                        } else {
+                            stringResource(
+                                R.string.tool_invocation_group_executing_action,
+                                runningLabel,
+                                toolInvocations.size,
+                            )
+                        },
                         modifier = Modifier.weight(1f),
                         travelDurationMillis = 2600,
                         pauseDurationMillis = 1000,
@@ -4063,6 +4072,18 @@ private fun summarizeToolInvocationCommandLabel(
     }.trim()
 }
 
+/** Plain-language label for the tool that is running now, including a short argument summary. */
+internal fun currentRunningToolLabel(invocations: List<ChatToolInvocation>): String {
+    val running = invocations.lastOrNull { it.isRunning } ?: return ""
+    return summarizeToolInvocationCommandLabel(
+        running.toolName,
+        parseJsonObject(running.argumentsJson),
+    ).ifBlank { running.toolName }
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .take(120)
+}
+
 private fun formatToolInvocationDetail(
     toolInvocation: ChatToolInvocation,
     arguments: JSONObject? = parseJsonObject(toolInvocation.argumentsJson),
@@ -4382,6 +4403,16 @@ private fun summarizeAgentDisplayCommand(arguments: JSONObject?): String {
             "agent_display list_apps${if (query.isBlank()) "" else " $query"}"
         }
         "launch" -> "agent_display launch ${arguments.optString("target").trim()}"
+        "find_and_tap", "tap_text", "find_text" -> {
+            val query = arguments.optString("query").trim().ifBlank { arguments.optString("text").trim() }
+            "agent_display $action ${query.take(48)}".trim()
+        }
+        "find_and_input" -> {
+            val query = arguments.optString("query").trim()
+            val text = arguments.optString("text").trim().take(32)
+            "agent_display find_and_input ${listOf(query, text).filter { it.isNotBlank() }.joinToString(" ")}".trim()
+        }
+        "tap_node" -> "agent_display tap_node ${arguments.optString("node_id").trim()}".trim()
         "tap" -> "agent_display tap x=${arguments.optString("x").trim()} y=${arguments.optString("y").trim()}"
         "swipe" -> "agent_display swipe ${arguments.optString("x1").trim()},${arguments.optString("y1").trim()} -> ${arguments.optString("x2").trim()},${arguments.optString("y2").trim()} ${arguments.optString("duration_ms").ifBlank { arguments.optString("durationMs") }.trim()}ms"
         "key" -> "agent_display key ${arguments.optString("key").trim()}"

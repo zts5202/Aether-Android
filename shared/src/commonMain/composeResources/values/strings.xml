@@ -698,6 +698,7 @@
     <string name="branch_steer_current_run">Steer current run</string>
     <string name="branch_queue_next_turn">Queue next turn</string>
     <string name="tool_invocation_group_executing">Executing %1$d tools</string>
+    <string name="tool_invocation_group_executing_action">%1$s · %2$d tools</string>
     <string name="tool_invocation_group_executed">Executed %1$d tools</string>
     <string name="tool_invocation_collapse_tools">Collapse tools</string>
     <string name="tool_invocation_expand_tools">Expand tools</string>

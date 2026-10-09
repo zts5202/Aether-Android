@@ -3,6 +3,7 @@ package com.zhousl.aether.ui
 import java.io.FileNotFoundException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationMessagesTest {
@@ -51,5 +52,28 @@ class ConversationMessagesTest {
         )
 
         assertNull(bitmap)
+    }
+
+    @Test
+    fun currentRunningToolLabelNamesTheLatestRunningAction() {
+        val label = currentRunningToolLabel(
+            listOf(
+                ChatToolInvocation(
+                    id = "done",
+                    toolName = "agent_display",
+                    argumentsJson = """{"action":"launch","target":"com.tencent.mm"}""",
+                    isRunning = false,
+                ),
+                ChatToolInvocation(
+                    id = "running",
+                    toolName = "agent_display",
+                    argumentsJson = """{"action":"find_and_tap","query":"发送"}""",
+                    isRunning = true,
+                ),
+            ),
+        )
+
+        assertTrue(label.contains("find_and_tap"))
+        assertTrue(label.contains("发送"))
     }
 }

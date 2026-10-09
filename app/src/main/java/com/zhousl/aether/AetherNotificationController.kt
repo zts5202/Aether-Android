@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.zhousl.aether.data.SessionExecutionState
+import com.zhousl.aether.data.foregroundRunningSessionLine
 import com.zhousl.aether.ui.ChatSession
 
 private const val ForegroundChannelId = "aether_background_runs"
@@ -58,9 +59,14 @@ class AetherNotificationController(
             context.getString(R.string.notification_running_many_tasks, activeSessions.size)
         }
         val untitled = context.getString(R.string.untitled_chat)
-        val body = activeSessions
-            .take(3)
-            .joinToString(separator = ", ") { it.title.ifBlank { untitled } }
+        val lines = activeSessions.take(3).map { session ->
+            foregroundRunningSessionLine(
+                sessionTitle = session.title,
+                pendingAssistantText = executionStates[session.id]?.pendingAssistantText.orEmpty(),
+                untitled = untitled,
+            )
+        }
+        val body = lines.joinToString(separator = ", ")
             .ifBlank { context.getString(R.string.notification_keeping_sessions) }
 
         val contentIntent = PendingIntent.getActivity(
@@ -79,8 +85,8 @@ class AetherNotificationController(
             .setStyle(
                 NotificationCompat.BigTextStyle()
                     .bigText(
-                        activeSessions.joinToString(separator = "\n") { session ->
-                            "- ${session.title.ifBlank { untitled }}"
+                        lines.joinToString(separator = "\n") { line ->
+                            "- $line"
                         }.ifBlank { body }
                     )
             )

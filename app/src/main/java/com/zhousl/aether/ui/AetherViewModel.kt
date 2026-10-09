@@ -17,6 +17,7 @@ import com.zhousl.aether.data.AetherModServiceMethod
 import com.zhousl.aether.data.AppUpdateManager
 import com.zhousl.aether.data.AutomaticModelPurpose
 import com.zhousl.aether.data.AgentModeAuthorizationMethod
+import com.zhousl.aether.data.isUsableGeneratedSessionTitle
 import com.zhousl.aether.data.AgentWorkspaceMode
 import com.zhousl.aether.data.AlpineEnvironmentVariable
 import com.zhousl.aether.data.AppLanguage
@@ -5467,6 +5468,7 @@ class AetherViewModel(
             ).getOrNull()
                 ?.assistantText
                 ?.sanitizeGeneratedSessionTitle()
+                ?.takeIf(::isUsableGeneratedSessionTitle)
                 .orEmpty()
 
             if (title.isBlank()) return@launch
