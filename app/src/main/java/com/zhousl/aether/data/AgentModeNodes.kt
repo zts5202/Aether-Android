@@ -32,6 +32,9 @@ internal const val AgentModeReasonOtherDisplay = "other_display_ignored"
 internal const val AgentModeReasonAccessibilityDisabled = "accessibility_service_disabled"
 internal const val AgentModeReasonRegionChanged = "region_changed"
 internal const val AgentModeReasonOcrChanged = "ocr_text_changed"
+internal const val AgentModeReasonEmptyTree = "empty_tree"
+internal const val AgentModeReasonUncertain = "uncertain"
+internal const val AgentModeReasonSendNeedsScreenshot = "send_needs_screenshot"
 internal const val AgentModeInvalidDisplayId = -1
 
 internal const val AgentModeAccessibilityHint =
@@ -414,6 +417,52 @@ internal fun selectAgentModeWindowIndexes(
         }
     }
     return AgentModeWindowSelection(accepted, foreign.toList())
+}
+
+private val AgentModeDecorTypes = setOf(
+    "View",
+    "ViewGroup",
+    "FrameLayout",
+    "LinearLayout",
+    "RelativeLayout",
+    "DecorView",
+    "ActionBarOverlayLayout",
+    "ContentFrameLayout",
+)
+
+/** A window that only has a root or unlabeled layout containers is not a usable control tree. */
+internal fun agentModeTreeHasControls(drafts: List<AgentModeNodeDraft>): Boolean =
+    drafts.any { draft ->
+        if (draft.text.isNotBlank() || draft.description.isNotBlank()) return@any true
+        if (!draft.clickable && !draft.editable) return@any false
+        draft.type.substringAfterLast('.') !in AgentModeDecorTypes
+    }
+
+/**
+ * Which tree source the caller should trust. An unusable UiAutomation read, including an empty
+ * tree reported as available, falls through to the accessibility service and then to OCR.
+ */
+internal fun agentModeChosenTreeSource(privileged: JSONObject?, fallback: JSONObject?): String = when {
+    privileged != null && agentModeTreeReadUsable(privileged) -> AgentModeSourceUiAutomation
+    fallback != null && agentModeTreeReadUsable(fallback) -> AgentModeSourceAccessibility
+    else -> AgentModeSourceOcr
+}
+
+/** An empty or interaction-less read is not success. A real tree that misses the query stays usable. */
+internal fun agentModeTreeReadUsable(body: JSONObject): Boolean {
+    if (!body.optBoolean("available")) return false
+    val reason = body.optString("reason")
+    if (
+        reason == AgentModeReasonEmptyTree ||
+        reason == AgentModeReasonDisplayNotInTree ||
+        reason == AgentModeReasonOtherDisplay
+    ) {
+        return false
+    }
+    val nodes = body.optJSONArray("nodes") ?: return true
+    if (nodes.length() > 0) return true
+    val candidates = if (body.has("candidate_count")) body.optInt("candidate_count") else -1
+    return candidates != 0
 }
 
 internal fun agentModeTargetKey(

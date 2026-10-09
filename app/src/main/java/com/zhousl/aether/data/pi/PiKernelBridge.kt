@@ -178,6 +178,19 @@ class PiKernelBridge(
             onEvent = onEvent,
         )
 
+    /** Asks the bridge to abort the running turn for [sessionId]. Failures are ignored. */
+    suspend fun abortSession(sessionId: String) {
+        if (sessionId.isBlank()) return
+        runCatching {
+            request(
+                type = "abort",
+                payload = JSONObject().put("session_id", sessionId),
+                timeoutMillis = PiBridgePingTimeoutMillis,
+                abortOnCancellation = false,
+            )
+        }
+    }
+
     suspend fun getSessionState(sessionId: String): JSONObject =
         request(
             type = "get_session_state",

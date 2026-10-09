@@ -7,6 +7,8 @@ import com.zhousl.aether.data.AetherAppExtensionManager
 import com.zhousl.aether.data.AlpineChromeController
 import com.zhousl.aether.data.AetherSelfManagementTool
 import com.zhousl.aether.data.AetherToolExecutor
+import com.zhousl.aether.data.AgentModeLoopDecision
+import com.zhousl.aether.data.AgentModeLoopGuard
 import com.zhousl.aether.data.AgentToolEvent
 import com.zhousl.aether.data.AppSettings
 import com.zhousl.aether.data.LlmMessage
@@ -314,6 +316,15 @@ class PiAgentRunner(
                         startRuntimeOperation(requestPayload, inputData)
                     }
 
+                    val loopGuard = AgentModeLoopGuard()
+                    var loopStopAnnounced = false
+                    suspend fun noteLoop(decision: AgentModeLoopDecision) {
+                        if (!decision.stop || loopStopAnnounced) return
+                        loopStopAnnounced = true
+                        onAssistantTextDelta("\n\n" + decision.message)
+                        bridge.abortSession(resolvedSessionId)
+                    }
+
                     val eventHandler: suspend (String, JSONObject) -> Unit = { event, eventPayload ->
                         when (event) {
                             "assistant_text_delta" ->
@@ -336,7 +347,11 @@ class PiAgentRunner(
 
                             "tool_call_start" -> {
                                 onAssistantTextReset()
-                                onToolEvent(eventPayload.toToolEvent(isRunning = true))
+                                val toolEvent = eventPayload.toToolEvent(isRunning = true)
+                                onToolEvent(toolEvent)
+                                if (agentModeEnabled && eventPayload.has("name")) {
+                                    noteLoop(loopGuard.beforeCall(toolEvent.name, toolEvent.argumentsJson))
+                                }
                             }
 
                             "tool_call_delta" -> {
@@ -348,8 +363,19 @@ class PiAgentRunner(
                                 }
                             }
 
-                            "tool_call_end" ->
-                                onToolEvent(eventPayload.toToolEvent(isRunning = false))
+                            "tool_call_end" -> {
+                                val toolEvent = eventPayload.toToolEvent(isRunning = false)
+                                onToolEvent(toolEvent)
+                                if (agentModeEnabled && eventPayload.has("name")) {
+                                    noteLoop(
+                                        loopGuard.afterResult(
+                                            toolEvent.name,
+                                            toolEvent.argumentsJson,
+                                            toolEvent.outputJson.orEmpty(),
+                                        ),
+                                    )
+                                }
+                            }
 
                             "host_tool_request" -> dispatchHostToolRequest(eventPayload)
 
@@ -426,6 +452,8 @@ class PiAgentRunner(
                         forwardInjectedMessages()
                         while (true) {
                             val injected = deferredInjectedMessages.poll() ?: break
+                            loopGuard.reset()
+                            loopStopAnnounced = false
                             response = bridge.followUp(
                                 sessionId = resolvedSessionId,
                                 message = injected.toPiJson(),

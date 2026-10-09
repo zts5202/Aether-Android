@@ -192,6 +192,8 @@ class AgentModeController(
     @Volatile
     private var previewSurface: Surface? = null
     private val failureGuard = AgentModeFailureGuard()
+    private val sendGate = AgentModeSendGate()
+    private var lastInputText: String = ""
     private var lastModelNodes: List<AgentModeNode> = emptyList()
     private var lastSnapshotId: String = ""
     private var lastSource: String = ""
@@ -693,6 +695,7 @@ class AgentModeController(
         val normX = normalizeAgentModePixel(point.x, state.width)
         val normY = normalizeAgentModePixel(point.y, state.height)
         blockedResult("tap", normalizedX = normX, normalizedY = normY)?.let { return it }
+        sendRepeatBlock("tap", query = null, normalizedX = normX, normalizedY = normY)?.let { return it }
         val tree = invokeTree(
             settings,
             displayId,
@@ -702,17 +705,22 @@ class AgentModeController(
             val before = captureDisplayText(settings)
             requireAgentModeService(settings).tap(displayId, point.x, point.y)
             updateCursorPosition(point.x, point.y, animationDurationMillis = 180)
-            val confirmation = confirmTapArea(settings, before, normX, normY)
+            val sendLike = agentModeSendLike(query = null, normalizedX = normX, normalizedY = normY)
+            if (sendLike) sendGate.record()
+            val confirmation = confirmTapArea(settings, before, normX, normY, sendLike = sendLike)
             JSONObject()
                 .put("ok", confirmation.confirmed)
                 .put("confirmed", confirmation.confirmed)
                 .put("action", "tap")
                 .put("source", AgentModeSourceOcr)
+                .put("status", confirmation.status)
                 .put("reason", confirmation.reason)
-                .put("stdout", if (confirmation.confirmed) {
-                    "Tapped the normalized point and the area around it changed."
-                } else {
-                    "Tapped the normalized point, but the area around it did not change."
+                .put("stdout", confirmation.stdout.ifBlank {
+                    if (confirmation.confirmed) {
+                        "Tapped the normalized point and the area around it changed."
+                    } else {
+                        "Tapped the normalized point, but the area around it did not change."
+                    }
                 })
                 .apply {
                     confirmation.elements?.let { put("elements", it) }
@@ -721,6 +729,7 @@ class AgentModeController(
         } else {
             tree.put("action", "tap")
             rememberCursor(tree, point.x, point.y)
+            applySendPolicy(tree, query = null, normalizedX = normX, normalizedY = normY)
             tree
         }
         failureGuard.record(
@@ -823,6 +832,7 @@ class AgentModeController(
         val displayId = ensureDisplay(settings)
         val text = arguments.optString("text")
         if (text.isEmpty()) return invalidArguments("Missing required 'text' argument.")
+        mergedOcrInputBlock(text, "text")?.let { return it }
         val tree = invokeTree(
             settings,
             displayId,
@@ -858,6 +868,7 @@ class AgentModeController(
         workspaceDirectory: String,
         termuxWorkspaceDirectory: String,
     ): String {
+        sendGate.noteScreenshot()
         val displayId = ensureDisplay(settings)
         val tree = invokeTree(settings, displayId, JSONObject().put("op", "dump"))
         if (tree.optBoolean("available")) {
@@ -902,6 +913,7 @@ class AgentModeController(
         val query = arguments.optString("query").trim()
         if (query.isBlank()) return invalidArguments("Missing required 'query' argument for find_and_tap.")
         blockedResult("find_and_tap", query = query)?.let { return it }
+        sendRepeatBlock("find_and_tap", query = query, normalizedX = null, normalizedY = null)?.let { return it }
         val tree = invokeTree(
             settings,
             displayId,
@@ -916,9 +928,12 @@ class AgentModeController(
                 displayId,
                 query,
                 attachScreenshot = attach,
+                diagnosis = tree,
+                action = "find_and_tap",
             )
         }
         tree.put("action", "find_and_tap")
+        applySendPolicy(tree, query = query, normalizedX = null, normalizedY = null)
         rememberNodes(tree)
         rememberCursor(tree, fallbackX = null, fallbackY = null)
         val confirmed = tree.optBoolean("confirmed")
@@ -943,6 +958,7 @@ class AgentModeController(
         val displayId = ensureDisplay(settings)
         val text = arguments.optString("text")
         if (text.isEmpty()) return invalidArguments("Missing required 'text' argument for find_and_input.")
+        mergedOcrInputBlock(text, "find_and_input")?.let { return it }
         val query = arguments.optString("query").trim()
         val point = optionalPoint(arguments)
         if (point is ResolvedPoint.Invalid) return invalidArguments(point.message)
@@ -1071,6 +1087,7 @@ class AgentModeController(
         val query = arguments.optString("query").trim()
         if (query.isBlank()) return invalidArguments("Missing required 'query' argument for tap_text.")
         blockedResult("tap_text", query = query)?.let { return it }
+        sendRepeatBlock("tap_text", query = query, normalizedX = null, normalizedY = null)?.let { return it }
         return tapTextResult(
             settings,
             workspaceDirectory,
@@ -1090,26 +1107,111 @@ class AgentModeController(
         if (!request.has("width")) request.put("width", state.width.coerceAtLeast(1))
         if (!request.has("height")) request.put("height", state.height.coerceAtLeast(1))
         val payload = request.toString()
+        val tried = JSONArray()
         val privileged = runCatching {
             JSONObject(requireAgentModeService(settings).interact(displayId, payload))
         }.getOrNull()
-        if (privileged != null && privileged.optBoolean("available")) {
-            finishPending(settings, displayId, privileged)
-            return privileged
+        tried.put(sourceAttempt(AgentModeSourceUiAutomation, privileged))
+        val fallback = if (agentModeTreeReadUsable(privileged ?: JSONObject())) {
+            null
+        } else {
+            runCatching {
+                AetherAgentModeAccessibilityService.interact(displayId, payload)?.let(::JSONObject)
+            }.getOrNull().also { body ->
+                tried.put(sourceAttempt(AgentModeSourceAccessibility, body))
+            }
         }
-        val fallback = runCatching {
-            AetherAgentModeAccessibilityService.interact(displayId, payload)?.let(::JSONObject)
-        }.getOrNull()
-        if (
-            fallback != null &&
-            fallback.optBoolean("available") &&
-            fallback.optString("reason") != AgentModeReasonDisplayNotInTree &&
-            fallback.optString("reason") != AgentModeReasonOtherDisplay
-        ) {
-            finishPending(settings, displayId, fallback)
-            return fallback
+        when (agentModeChosenTreeSource(privileged, fallback)) {
+            AgentModeSourceUiAutomation -> {
+                finishPending(settings, displayId, privileged!!)
+                privileged.put("sources_tried", tried)
+                return privileged
+            }
+            AgentModeSourceAccessibility -> {
+                finishPending(settings, displayId, fallback!!)
+                fallback.put("sources_tried", tried)
+                return fallback
+            }
         }
-        return unavailableTree(privileged, fallback)
+        return unavailableTree(privileged, fallback).put("sources_tried", tried)
+    }
+
+    /** One row of `sources_tried`. `available` means the read was usable, not merely that a window existed. */
+    private fun sourceAttempt(source: String, body: JSONObject?): JSONObject {
+        if (body == null) {
+            return JSONObject()
+                .put("source", source)
+                .put("available", false)
+                .put("reason", "not_returned")
+                .put("node_count", 0)
+                .put("candidate_count", 0)
+                .put("errmsg", "")
+        }
+        val nodes = body.optJSONArray("nodes")
+        val nodeCount = nodes?.length() ?: 0
+        return JSONObject()
+            .put("source", source)
+            .put("available", agentModeTreeReadUsable(body))
+            .put("reason", body.optString("reason"))
+            .put("node_count", nodeCount)
+            .put(
+                "candidate_count",
+                if (body.has("candidate_count")) body.optInt("candidate_count") else nodeCount,
+            )
+            .put("errmsg", body.optString("errmsg"))
+    }
+
+    private fun sendRepeatBlock(
+        action: String,
+        query: String?,
+        normalizedX: Int?,
+        normalizedY: Int?,
+    ): String? {
+        if (!sendGate.shouldBlock(query, normalizedX, normalizedY)) return null
+        return JSONObject()
+            .put("ok", false)
+            .put("confirmed", false)
+            .put("status", "uncertain")
+            .put("action", action)
+            .put("reason", AgentModeReasonSendNeedsScreenshot)
+            .put("errmsg", AgentModeSendRepeatMessage)
+            .put("stdout", AgentModeSendRepeatMessage)
+            .put("screenshot_omitted", "not_requested")
+            .toString()
+    }
+
+    private fun applySendPolicy(
+        body: JSONObject,
+        query: String?,
+        normalizedX: Int?,
+        normalizedY: Int?,
+    ) {
+        if (!agentModeSendLike(query, normalizedX, normalizedY)) return
+        if (body.optString("reason") == AgentModeReasonNodeNotFound) return
+        sendGate.record()
+        if (body.optBoolean("confirmed")) {
+            body.put("status", "confirmed")
+            return
+        }
+        body.put("ok", false)
+        body.put("confirmed", false)
+        body.put("status", "uncertain")
+        body.put("reason", AgentModeReasonUncertain)
+        body.put("stdout", AgentModeUncertainSendMessage)
+    }
+
+    private fun mergedOcrInputBlock(text: String, action: String): String? {
+        if (!agentModeInputLooksLikeMergedOcr(text)) return null
+        val message =
+            "This text looks like an OCR line that includes the send label. Pass only the user's message. Nothing was pasted."
+        return JSONObject()
+            .put("ok", false)
+            .put("confirmed", false)
+            .put("action", action)
+            .put("reason", "ocr_text_rejected")
+            .put("errmsg", message)
+            .put("stdout", message)
+            .toString()
     }
 
     private fun unavailableTree(privileged: JSONObject?, fallback: JSONObject?): JSONObject {
@@ -1151,8 +1253,10 @@ class AgentModeController(
     private fun copyTreeDiagnosis(tree: JSONObject, target: JSONObject) {
         if (tree.has("accessibility_hint")) target.put("accessibility_hint", tree.optString("accessibility_hint"))
         if (tree.has("foreign_display_ids")) target.put("foreign_display_ids", tree.opt("foreign_display_ids"))
+        if (tree.has("sources_tried")) target.put("sources_tried", tree.opt("sources_tried"))
         if (tree.optString("reason") == AgentModeReasonAccessibilityDisabled ||
-            tree.optString("reason") == AgentModeReasonOtherDisplay
+            tree.optString("reason") == AgentModeReasonOtherDisplay ||
+            tree.optString("reason") == AgentModeReasonEmptyTree
         ) {
             target.put("tree_reason", tree.optString("reason"))
         }
@@ -1544,6 +1648,7 @@ class AgentModeController(
             put(
                 JSONObject().apply {
                     put("text", element.text)
+                    if (element.granularity == AgentModeOcrGranularity.SYMBOL) return@forEach
                     put(
                         "bbox_norm",
                         JSONArray().apply {
@@ -1553,6 +1658,7 @@ class AgentModeController(
                             put(normalizeAgentModePixel(box.bottom, imageHeight))
                         },
                     )
+                    put("granularity", element.granularity.name.lowercase())
                 },
             )
         }
@@ -1654,9 +1760,25 @@ class AgentModeController(
         normalizedX: Int,
         normalizedY: Int,
         query: String? = null,
+        sendLike: Boolean = false,
     ): TapConfirmation {
         delay(220)
         val after = captureDisplayText(settings)
+        val elements = after?.let { elementsJson(it.elements, it.imageWidth, it.imageHeight) }
+        if (sendLike) {
+            val check = agentModeSendCheck(lastInputText, visibleLines(before), visibleLines(after))
+            return TapConfirmation(
+                confirmed = check.confirmed,
+                status = if (check.confirmed) "confirmed" else "uncertain",
+                reason = check.reason,
+                stdout = if (check.confirmed) {
+                    "The send changed the composer or the message appeared in the chat."
+                } else {
+                    AgentModeUncertainSendMessage
+                },
+                elements = elements,
+            )
+        }
         val cells = agentModeRegionCellIndexes(
             normalizedX,
             normalizedY,
@@ -1671,15 +1793,29 @@ class AgentModeController(
                 before.elements.map { it.text },
                 after.elements.map { it.text },
             )
+        val confirmed = regionChanged || ocrChanged
         return TapConfirmation(
-            confirmed = regionChanged || ocrChanged,
+            confirmed = confirmed,
+            status = if (confirmed) "confirmed" else "not_confirmed",
             reason = when {
                 ocrChanged -> AgentModeReasonOcrChanged
                 regionChanged -> AgentModeReasonRegionChanged
                 else -> AgentModeReasonNotConfirmed
             },
-            elements = after?.let { elementsJson(it.elements, it.imageWidth, it.imageHeight) },
+            stdout = "",
+            elements = elements,
         )
+    }
+
+    private fun visibleLines(capture: DisplayTextCapture?): List<AgentModeVisibleLine> {
+        if (capture == null) return emptyList()
+        return capture.elements.mapNotNull { element ->
+            if (element.granularity == AgentModeOcrGranularity.SYMBOL) return@mapNotNull null
+            AgentModeVisibleLine(
+                text = element.text,
+                top = normalizeAgentModePixel(element.boundingBox.top, capture.imageHeight),
+            )
+        }
     }
 
     private suspend fun pasteOnDisplay(
@@ -1690,6 +1826,7 @@ class AgentModeController(
     ): JSONObject {
         val before = captureDisplayText(settings)
         beforePaste?.invoke()
+        lastInputText = text
         val method = requireAgentModeService(settings).text(displayId, text)
         delay(250)
         val after = captureDisplayText(settings)
@@ -1723,9 +1860,9 @@ class AgentModeController(
             .put(
                 "stdout",
                 if (confirmed) {
-                    "Pasted on the Agent Mode display and the composer area changed."
+                    "Replaced the composer with the user's text. Sending is a separate tap. Do not paste this text again."
                 } else {
-                    "Pasted on the Agent Mode display. Do not tap the field first and do not send the same text again unless the composer is still empty."
+                    "Replaced the composer with the user's text. Do not paste OCR text, and do not tap send more than once."
                 },
             )
             .apply {
@@ -1735,7 +1872,9 @@ class AgentModeController(
 
     private data class TapConfirmation(
         val confirmed: Boolean,
+        val status: String,
         val reason: String,
+        val stdout: String,
         val elements: JSONArray?,
     )
 
@@ -1772,7 +1911,7 @@ class AgentModeController(
         }.toString()
     }
 
-    /** `tap_text`: locate [query], tap its center, and report whether the screen changed. */
+    /** `tap_text`: locate [query], tap its own box center, and report whether the screen changed. */
     private suspend fun tapTextResult(
         settings: AppSettings,
         workspaceDirectory: String,
@@ -1780,13 +1919,15 @@ class AgentModeController(
         displayId: Int,
         query: String,
         attachScreenshot: Boolean,
+        diagnosis: JSONObject? = null,
+        action: String = "tap_text",
     ): String {
         var capture = captureDisplayText(settings)
             ?: return toolError(
                 message = "Unable to capture the Agent Mode display for text recognition.",
-                action = "tap_text",
+                action = action,
             )
-        var match = matchElements(capture.elements, query).firstOrNull()
+        var match = selectOcrTapTarget(capture.elements, query)
         var scrollAttempts = 0
         // Only a missing element triggers scrolling: once it is found we tap where it is, so this
         // can never turn into a repeat click on a target the caller already acted on.
@@ -1794,27 +1935,35 @@ class AgentModeController(
             if (!scrollForTextSearch(settings, displayId)) break
             scrollAttempts++
             capture = captureDisplayText(settings) ?: break
-            match = matchElements(capture.elements, query).firstOrNull()
+            match = selectOcrTapTarget(capture.elements, query)
         }
         val resolvedMatch = match ?: run {
             failureGuard.record(success = false, query = query)
+            val mergedLine = capture.elements.any { element ->
+                element.granularity == AgentModeOcrGranularity.LINE &&
+                    element.text.contains(query, ignoreCase = true) &&
+                    !element.text.trim().equals(query, ignoreCase = true)
+            }
+            val message = if (mergedLine) {
+                "The label '$query' only appears inside a merged OCR line and has no own box. Nothing was tapped."
+            } else {
+                "No element matching '$query' was found " +
+                    "(${capture.elements.size} OCR line(s) after $scrollAttempts scroll attempt(s)). " +
+                    "Nothing was tapped. These lines cannot confirm a control."
+            }
             return JSONObject().apply {
                 put("ok", false)
                 put("confirmed", false)
-                put("action", "tap_text")
+                put("action", action)
                 put("query", query)
                 put("source", AgentModeSourceOcr)
                 put("reason", AgentModeReasonNodeNotFound)
                 put("confirmation", "无法确认")
                 put("screenshot_omitted", "not_requested")
                 put("elements", elementsJson(capture.elements, capture.imageWidth, capture.imageHeight))
-                put(
-                    "errmsg",
-                    "No element matching '$query' was found " +
-                        "(${capture.elements.size} OCR line(s) after $scrollAttempts scroll attempt(s)). " +
-                        "Nothing was tapped. These lines cannot confirm a control.",
-                )
-                put("stdout", "No control tree. OCR lines cannot confirm '$query'. Nothing was tapped.")
+                put("errmsg", message)
+                put("stdout", message)
+                if (diagnosis != null) copyTreeDiagnosis(diagnosis, this)
             }.toString()
         }
         val state = _displayState.value
@@ -1832,14 +1981,16 @@ class AgentModeController(
             return toolError(
                 message = "Matched '${resolvedMatch.text}' but could not map it to a tappable display " +
                     "coordinate. Nothing was tapped.",
-                action = "tap_text",
+                action = action,
             )
         }
         val normX = normalizeAgentModePixel(resolvedMatch.boundingBox.centerX(), capture.imageWidth)
         val normY = normalizeAgentModePixel(resolvedMatch.boundingBox.centerY(), capture.imageHeight)
+        val sendLike = agentModeSendLike(query, normX, normY)
+        if (sendLike) sendGate.record()
         requireAgentModeService(settings).tap(displayId, targetX, targetY)
         updateCursorPosition(targetX, targetY, animationDurationMillis = 180)
-        val confirmation = confirmTapArea(settings, capture, normX, normY, query)
+        val confirmation = confirmTapArea(settings, capture, normX, normY, query, sendLike = sendLike)
         failureGuard.record(success = confirmation.confirmed, query = query)
         val bbox = JSONArray().apply {
             put(normalizeAgentModePixel(resolvedMatch.boundingBox.left, capture.imageWidth))
@@ -1850,24 +2001,29 @@ class AgentModeController(
         val extras = JSONObject()
             .put("ok", confirmation.confirmed)
             .put("confirmed", confirmation.confirmed)
-            .put("action", "tap_text")
+            .put("action", action)
             .put("query", query)
             .put("source", AgentModeSourceOcr)
+            .put("status", confirmation.status)
             .put("reason", confirmation.reason)
             .put("matched_text", resolvedMatch.text)
+            .put("matched_granularity", resolvedMatch.granularity.name.lowercase())
             .put("scroll_attempts", scrollAttempts)
             .put("matched_bbox_norm", bbox)
             .put("tap_norm", JSONArray().put(normX).put(normY))
             .put(
                 "stdout",
-                if (confirmation.confirmed) {
-                    "Tapped the OCR box center of '${resolvedMatch.text}' at normalized [$normX, $normY]. The target area changed."
-                } else {
-                    "Tapped the OCR box center of '${resolvedMatch.text}' at normalized [$normX, $normY], but that area did not change. Do not convert screenshot pixels."
+                confirmation.stdout.ifBlank {
+                    if (confirmation.confirmed) {
+                        "Tapped the OCR box center of '${resolvedMatch.text}' at normalized [$normX, $normY]. The target area changed."
+                    } else {
+                        "Tapped the OCR box center of '${resolvedMatch.text}' at normalized [$normX, $normY], but that area did not change. Take one screenshot to check. Do not tap it again."
+                    }
                 },
             )
             .apply {
                 confirmation.elements?.let { put("elements", it) }
+                if (diagnosis != null) copyTreeDiagnosis(diagnosis, this)
             }
         if (!attachScreenshot) {
             return deliver(
