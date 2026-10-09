@@ -246,6 +246,10 @@
     <string name="settings_agent_mode_unavailable">حالت عامل در دسترس نیست</string>
     <string name="settings_agent_mode_already_configured">حالت عامل قبلاً پیکربندی شده است</string>
     <string name="settings_agent_mode_description">ابزارهای نمایش مجازی مجزا را با Shizuku یا Root مجاز کنید. بدون هیچ کدام از گزینه‌ها، از این روی دستگاه‌ها رد شوید.</string>
+    <string name="settings_agent_mode_accessibility_title">سرویس دسترس‌پذیری خاموش است</string>
+    <string name="settings_agent_mode_accessibility_body">حالت عامل تا وقتی این سرویس روشن نشود نمی‌تواند کنترل‌های نمایش مجازی را بخواند. اگر گوشی آن را مسدود کرد، در اطلاعات برنامه تنظیمات محدود را مجاز کنید و سپس Aether را در دسترس‌پذیری فعال کنید.</string>
+    <string name="settings_agent_mode_accessibility_action">باز کردن تنظیمات دسترس‌پذیری</string>
+    <string name="chat_agent_mode_accessibility_hint">سرویس دسترس‌پذیری خاموش یا مسدود است. آن را در تنظیمات فعال کنید تا حالت عامل این نمایش را بخواند. تا آن زمان از متن روی صفحه استفاده می‌کند و مختصات حدس نمی‌زند.</string>
     <string name="settings_agent_mode_authorization">مجوز حالت عامل</string>
     <string name="settings_agent_mode_authorization_subtitle">ابزارهای نمایش مجازی ایزوله را فعال می کند. به Shizuku یا Root نیاز دارد.</string>
     <string name="settings_authorization_method">روش مجوز</string>

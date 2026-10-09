@@ -2,10 +2,12 @@ package com.zhousl.aether.agentmode
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityWindowInfo
 import androidx.annotation.Keep
 import com.zhousl.aether.data.AgentModeSourceAccessibility
 
@@ -44,9 +46,11 @@ class AetherAgentModeAccessibilityService : AccessibilityService() {
 
     fun interact(displayId: Int, requestJson: String): String = session.handle(displayId, requestJson)
 
-    private fun windowsForDisplay(displayId: Int): List<AccessibilityWindowInfo>? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
-        return windowsOnAllDisplays.get(displayId)?.toList().orEmpty()
+    private fun windowsForDisplay(displayId: Int): AgentModeWindowBatch? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return AgentModeWindowBatch(emptyList())
+        }
+        return windowsForRequestedDisplay(displayId, windowsOnAllDisplays)
     }
 
     companion object {
@@ -55,5 +59,16 @@ class AetherAgentModeAccessibilityService : AccessibilityService() {
 
         fun interact(displayId: Int, requestJson: String): String? =
             instance?.interact(displayId, requestJson)
+
+        fun isEnabled(context: Context): Boolean {
+            if (instance != null) return true
+            val expected = ComponentName(context, AetherAgentModeAccessibilityService::class.java)
+                .flattenToString()
+            val enabled = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            ).orEmpty()
+            return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+        }
     }
 }

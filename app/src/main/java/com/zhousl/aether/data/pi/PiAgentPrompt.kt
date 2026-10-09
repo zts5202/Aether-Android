@@ -34,12 +34,13 @@ internal fun buildPiAgentInstructions(
     if (agentModeEnabled) {
         append(
             "\n\nAgent Mode is enabled for this chat. Use agent_display only when operating the isolated Android virtual display is required. " +
+                "Sending a chat message is launch, then find_and_input, then find_and_tap on the send label. Do not take a screenshot for those steps. " +
                 "Prefer find_and_tap, find_and_input, and tap_node over raw coordinates. " +
                 "Do not guess the same area again after a miss; two failures on the same target stop the next attempt. " +
-                "Tap and swipe coordinates use the normalized 0..1000 range on each axis, not screenshot or display pixels: " +
-                "x = pixel_x / image_width * 1000, y = pixel_y / image_height * 1000. " +
+                "Do not convert screenshot pixels or guess a y near the composer. OCR results already include bbox_norm, and the app taps that box center. " +
                 "Routine taps and typing do not include a screenshot. Pass include_screenshot only when the image is needed, or call action=screenshot. " +
-                "Treat source=ocr as unconfirmed text, not as a control tree."
+                "If accessibility_hint is present, the accessibility service is off or restricted: keep using find_and_input and find_and_tap. " +
+                "clipboard_paste means the text was already sent."
         )
     }
     if (chromeEnabled) {

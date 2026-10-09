@@ -2,6 +2,7 @@ package com.zhousl.aether.data
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,5 +45,29 @@ class AgentModeFrameDiffTest {
 
         assertArrayEquals(intArrayOf(127), areaAveragedGrayGrid(pixels, 2, 2, 1, 1))
         assertArrayEquals(intArrayOf(0, 255, 0, 255), areaAveragedGrayGrid(pixels, 2, 2, 2, 2))
+    }
+
+    @Test
+    fun aChangeBesideTheTapCountsAndADistantCellDoesNot() {
+        val columns = 32
+        val rows = 64
+        val cells = agentModeRegionCellIndexes(915, 966, columns, rows)
+        assertTrue(cells.isNotEmpty())
+        assertFalse(0 in cells)
+        val before = IntArray(columns * rows) { 100 }
+        val changedInside = before.copyOf()
+        changedInside[cells.first()] = 200
+        assertTrue(agentModeRegionChanged(before, changedInside, cells))
+        val changedCorner = before.copyOf()
+        changedCorner[0] = 200
+        assertFalse(agentModeRegionChanged(before, changedCorner, cells))
+    }
+
+    @Test
+    fun ocrConfirmationFlipsOnlyWhenTheTargetAppearsOrDisappears() {
+        assertTrue(agentModeOcrTargetChanged("发送", listOf("发送"), listOf("已发送")))
+        assertFalse(agentModeOcrTargetChanged("发送", listOf("发送"), listOf("发送", "更多")))
+        assertTrue(agentModeTextVisible("你好", listOf("你好")))
+        assertTrue(agentModeTextVisible("你好世界", listOf("前缀你好世界后缀")))
     }
 }

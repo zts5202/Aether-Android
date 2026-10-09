@@ -28,6 +28,14 @@ internal const val AgentModeReasonOcrUnconfirmed = "ocr_unconfirmed"
 internal const val AgentModeReasonInjectedUnconfirmed = "injected_unconfirmed"
 internal const val AgentModeReasonUiAutomationUnavailable = "ui_automation_unavailable"
 internal const val AgentModeReasonDisplayNotInTree = "display_not_in_tree"
+internal const val AgentModeReasonOtherDisplay = "other_display_ignored"
+internal const val AgentModeReasonAccessibilityDisabled = "accessibility_service_disabled"
+internal const val AgentModeReasonRegionChanged = "region_changed"
+internal const val AgentModeReasonOcrChanged = "ocr_text_changed"
+internal const val AgentModeInvalidDisplayId = -1
+
+internal const val AgentModeAccessibilityHint =
+    "Accessibility service is off or blocked by restricted settings. Enable Aether's Agent Mode accessibility service in system Accessibility settings, and allow restricted settings if the phone asks. Until then there is no control tree: use find_and_input and find_and_tap. Do not guess coordinates."
 
 private val ScreenshotOnRequestActions = setOf(
     "tap",
@@ -368,6 +376,44 @@ internal class AgentModeFailureGuard {
         y = null
         failures = 0
     }
+}
+
+internal data class AgentModeWindowCandidate(
+    val mapKey: Int,
+    val displayId: Int,
+)
+
+internal data class AgentModeWindowSelection(
+    val acceptedIndexes: List<Int>,
+    val foreignDisplayIds: List<Int>,
+)
+
+/**
+ * Keeps only windows whose own display id is the Agent Mode display.
+ * A map key is not enough: some devices file the main display's windows under another key,
+ * and those windows must not be returned as if they belonged to the virtual display.
+ */
+internal fun selectAgentModeWindowIndexes(
+    requestedDisplayId: Int,
+    candidates: List<AgentModeWindowCandidate>,
+): AgentModeWindowSelection {
+    val accepted = mutableListOf<Int>()
+    val foreign = linkedSetOf<Int>()
+    candidates.forEachIndexed { index, candidate ->
+        val belongs = candidate.displayId == requestedDisplayId ||
+            (candidate.displayId == AgentModeInvalidDisplayId && candidate.mapKey == requestedDisplayId)
+        if (belongs) {
+            accepted += index
+        } else {
+            val foreignId = if (candidate.displayId != AgentModeInvalidDisplayId) {
+                candidate.displayId
+            } else {
+                candidate.mapKey
+            }
+            if (foreignId != requestedDisplayId) foreign += foreignId
+        }
+    }
+    return AgentModeWindowSelection(accepted, foreign.toList())
 }
 
 internal fun agentModeTargetKey(

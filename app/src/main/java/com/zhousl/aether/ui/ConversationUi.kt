@@ -158,6 +158,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.graphics.PathParser
 import com.zhousl.aether.R
+import com.zhousl.aether.agentmode.AetherAgentModeAccessibilityService
 import com.zhousl.aether.data.InstalledSkill
 import com.zhousl.aether.data.CreateExtensionSkillId
 import com.zhousl.aether.data.AppLanguage
@@ -3186,6 +3187,13 @@ private fun AgentModePreviewPanel(
                 displayState = displayState,
                 label = resolvedLabel,
                 isChrome = !useLiveSurface,
+            )
+        }
+        if (useLiveSurface && !AetherAgentModeAccessibilityService.isEnabled(LocalContext.current)) {
+            Text(
+                text = stringResource(R.string.chat_agent_mode_accessibility_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = AetherOnSurfaceVariant,
             )
         }
         if (displayState.isActive || bitmap != null) {

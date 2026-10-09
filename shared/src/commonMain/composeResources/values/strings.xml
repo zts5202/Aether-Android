@@ -254,6 +254,10 @@
     <string name="settings_agent_mode_unavailable">Agent Mode is unavailable</string>
     <string name="settings_agent_mode_already_configured">Agent Mode is already configured</string>
     <string name="settings_agent_mode_description">Authorize isolated virtual-display tools with Shizuku or Root. Skip this on devices without either option.</string>
+    <string name="settings_agent_mode_accessibility_title">Accessibility service is off</string>
+    <string name="settings_agent_mode_accessibility_body">Agent Mode cannot read controls on its virtual display until this service is on. If the phone blocks it, open the app info page and allow restricted settings, then enable Aether in Accessibility.</string>
+    <string name="settings_agent_mode_accessibility_action">Open Accessibility settings</string>
+    <string name="chat_agent_mode_accessibility_hint">Accessibility service is off or blocked. Enable it in Settings so Agent Mode can read this display. Until then the agent uses on-screen text instead of guessing.</string>
     <string name="settings_agent_mode_authorization">Agent Mode authorization</string>
     <string name="settings_agent_mode_authorization_subtitle">Enables isolated virtual-display tools. Requires Shizuku or Root.</string>
     <string name="settings_authorization_method">Authorization method</string>

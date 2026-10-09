@@ -1,5 +1,7 @@
 package com.zhousl.aether.ui
 
+import android.content.Intent
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -132,6 +134,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.zhousl.aether.BuildConfig
 
 import com.zhousl.aether.R
+import com.zhousl.aether.agentmode.AetherAgentModeAccessibilityService
 import java.util.Locale
 import java.time.Instant
 import java.time.LocalDate
@@ -5879,6 +5882,36 @@ private fun AgentModeSettingsPage(
             color = AetherOnSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp),
         )
+
+        val accessibilityContext = LocalContext.current
+        if (!AetherAgentModeAccessibilityService.isEnabled(accessibilityContext)) {
+            Spacer(Modifier.height(16.dp))
+            SettingsCardGroup {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_agent_mode_accessibility_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = AetherOnSurface,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.settings_agent_mode_accessibility_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AetherOnSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    SettingsActionButton(
+                        label = stringResource(R.string.settings_agent_mode_accessibility_action),
+                        onClick = {
+                            accessibilityContext.startActivity(
+                                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        },
+                    )
+                }
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
 
