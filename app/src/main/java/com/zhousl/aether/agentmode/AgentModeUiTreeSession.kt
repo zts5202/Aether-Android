@@ -12,6 +12,7 @@ import com.zhousl.aether.data.AgentModeReasonActionClick
 import com.zhousl.aether.data.AgentModeReasonActionSetText
 import com.zhousl.aether.data.AgentModeReasonClipboardPaste
 import com.zhousl.aether.data.AgentModeReasonDisplayNotInTree
+import com.zhousl.aether.data.AgentModeReasonOtherDisplay
 import com.zhousl.aether.data.AgentModeReasonFocusChanged
 import com.zhousl.aether.data.AgentModeReasonNodeNotFound
 import com.zhousl.aether.data.AgentModeReasonNotConfirmed
@@ -39,7 +40,7 @@ internal interface AgentModeTreeInjector {
  */
 internal class AgentModeUiTreeSession(
     private val source: String,
-    private val windowsOnDisplay: (Int) -> List<AccessibilityWindowInfo>?,
+    private val windowsOnDisplay: (Int) -> AgentModeWindowBatch?,
     private val injector: AgentModeTreeInjector?,
 ) {
     private val lock = Any()
@@ -94,15 +95,22 @@ internal class AgentModeUiTreeSession(
         height: Int,
         block: (List<Collected>) -> JSONObject,
     ): JSONObject {
-        val windows = windowsOnDisplay(displayId)
+        val batch = windowsOnDisplay(displayId)
             ?: return jsonFailure(available = false, reason = AgentModeReasonUiAutomationUnavailable, message = "UiAutomation is not connected.")
-        if (windows.isEmpty()) {
+        if (batch.windows.isEmpty()) {
+            val foreign = batch.foreignDisplayIds
+            val otherDisplays = foreign.isNotEmpty()
             return jsonFailure(
                 available = false,
-                reason = AgentModeReasonDisplayNotInTree,
-                message = "Display $displayId is not in the accessibility window list.",
-            )
+                reason = if (otherDisplays) AgentModeReasonOtherDisplay else AgentModeReasonDisplayNotInTree,
+                message = if (otherDisplays) {
+                    "Display $displayId has no controls. Windows on other displays $foreign were ignored."
+                } else {
+                    "Display $displayId is not in the accessibility window list."
+                },
+            ).put("foreign_display_ids", JSONArray(foreign))
         }
+        val windows = batch.windows
         val collected = collect(windows)
         windows.forEach { runCatching { it.recycle() } }
         return try {
@@ -196,6 +204,7 @@ internal class AgentModeUiTreeSession(
         val published = publish(collected, query, width, height, pin = setOfNotNull(index))
         if (index == null) {
             return notFound(published, query.ifBlank { text }, width, height, collected)
+                .put("needs_legacy_text", true)
         }
         return writeText(displayId, collected, index, text, published)
     }
@@ -546,7 +555,18 @@ internal class AgentModeUiTreeSession(
             node.recycle()
             return
         }
-        val index = if (node.isVisibleToUser) {
+        // isVisibleToUser is often false for every node on a virtual display, which used to
+        // drop the whole WeChat tree. Interactive nodes and nodes with text are kept anyway.
+        val keep = collected.size < MaxCollectedNodes && (
+            node.isVisibleToUser ||
+                node.isEditable ||
+                node.isClickable ||
+                node.isFocusable ||
+                node.isScrollable ||
+                !node.text.isNullOrBlank() ||
+                !node.contentDescription.isNullOrBlank()
+            )
+        val index = if (keep) {
             collected.add(
                 Collected(
                     info = node,
@@ -560,9 +580,9 @@ internal class AgentModeUiTreeSession(
         }
         for (childIndex in 0 until node.childCount) {
             val child = node.getChild(childIndex) ?: continue
-            walk(child, if (node.isVisibleToUser) index else parentIndex, collected)
+            walk(child, if (keep) index else parentIndex, collected)
         }
-        if (!node.isVisibleToUser) node.recycle()
+        if (!keep) node.recycle()
     }
 
     private fun draftOf(node: AccessibilityNodeInfo): AgentModeNodeDraft {
@@ -629,6 +649,6 @@ internal class AgentModeUiTreeSession(
     }
 
     private companion object {
-        const val MaxCollectedNodes = 1000
+        const val MaxCollectedNodes = 4000
     }
 }

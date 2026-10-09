@@ -253,6 +253,10 @@
     <string name="settings_agent_mode_unavailable">Agent 模式不可用</string>
     <string name="settings_agent_mode_already_configured">Agent 模式已配置完成</string>
     <string name="settings_agent_mode_description">使用 Shizuku 或 Root 授权隔离虚拟显示工具。没有这两种条件的设备可以跳过。</string>
+    <string name="settings_agent_mode_accessibility_title">无障碍服务未开启</string>
+    <string name="settings_agent_mode_accessibility_body">未开启这项服务时，Agent 模式读不到虚拟屏幕上的控件。如果手机拦截了开关，请先在应用信息里允许受限制的设置，再在无障碍里启用 Aether。</string>
+    <string name="settings_agent_mode_accessibility_action">打开无障碍设置</string>
+    <string name="chat_agent_mode_accessibility_hint">无障碍服务未开启或被受限制设置拦住了。请到设置里启用，Agent 模式才能读取这块屏幕。在此之前它会用屏幕上的文字操作，而不是猜测坐标。</string>
     <string name="settings_agent_mode_authorization">Agent 模式授权</string>
     <string name="settings_agent_mode_authorization_subtitle">启用隔离虚拟显示工具。需要 Shizuku 或 Root。</string>
     <string name="settings_authorization_method">授权方式</string>

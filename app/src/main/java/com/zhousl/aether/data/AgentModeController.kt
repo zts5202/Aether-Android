@@ -699,16 +699,25 @@ class AgentModeController(
             JSONObject().put("op", "click_at").put("x", point.x).put("y", point.y),
         )
         val body = if (!tree.optBoolean("available")) {
+            val before = captureDisplayText(settings)
             requireAgentModeService(settings).tap(displayId, point.x, point.y)
             updateCursorPosition(point.x, point.y, animationDurationMillis = 180)
+            val confirmation = confirmTapArea(settings, before, normX, normY)
             JSONObject()
-                .put("ok", true)
-                .put("confirmed", false)
+                .put("ok", confirmation.confirmed)
+                .put("confirmed", confirmation.confirmed)
                 .put("action", "tap")
                 .put("source", AgentModeSourceOcr)
-                .put("reason", AgentModeReasonInjectedUnconfirmed)
-                .put("confirmation", "无法确认")
-                .put("errmsg", "No control tree. The coordinate tap was injected, but it cannot be confirmed.")
+                .put("reason", confirmation.reason)
+                .put("stdout", if (confirmation.confirmed) {
+                    "Tapped the normalized point and the area around it changed."
+                } else {
+                    "Tapped the normalized point, but the area around it did not change."
+                })
+                .apply {
+                    confirmation.elements?.let { put("elements", it) }
+                    copyTreeDiagnosis(tree, this)
+                }
         } else {
             tree.put("action", "tap")
             rememberCursor(tree, point.x, point.y)
@@ -727,7 +736,7 @@ class AgentModeController(
             termuxWorkspaceDirectory,
             body,
             attachScreenshot = agentModeAttachesScreenshot("tap", agentModeWantsScreenshot(arguments)),
-            includeOcr = !tree.optBoolean("available"),
+            includeOcr = !tree.optBoolean("available") && !body.has("elements"),
         )
     }
 
@@ -821,7 +830,9 @@ class AgentModeController(
         )
         val attach = agentModeAttachesScreenshot("text", agentModeWantsScreenshot(arguments))
         val body = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
-            legacyTextBody(settings, displayId, text, tree)
+            pasteOnDisplay(settings, displayId, text).put("action", "text").also { pasted ->
+                copyTreeDiagnosis(tree, pasted)
+            }
         } else {
             tree.put("action", "text")
             if (!tree.optBoolean("confirmed") && tree.optString("text_input_method").isNotBlank()) {
@@ -838,42 +849,8 @@ class AgentModeController(
             termuxWorkspaceDirectory,
             body,
             attachScreenshot = attach,
-            includeOcr = body.optString("source") == AgentModeSourceOcr,
+            includeOcr = body.optString("source") == AgentModeSourceOcr && !body.has("elements"),
         )
-    }
-
-    private suspend fun legacyTextBody(
-        settings: AppSettings,
-        displayId: Int,
-        text: String,
-        tree: JSONObject,
-    ): JSONObject {
-        val focus = focusExtras(settings, displayId)
-        if (focus.has("focused_window") && focus.optString("focused_window").isBlank()) {
-            return focus
-                .put("ok", false)
-                .put("confirmed", false)
-                .put("action", "text")
-                .put("source", tree.optString("source").ifBlank { AgentModeSourceOcr })
-                .put("reason", AgentModeReasonNotConfirmed)
-                .put("confirmation", "无法确认")
-                .put(
-                    "errmsg",
-                    "No window on Agent Mode display $displayId has input focus, so the text was not sent. " +
-                        "Use find_and_input on the field, or tap it and retry.",
-                )
-        }
-        val method = requireAgentModeService(settings).text(displayId, text)
-        return focus
-            .put("ok", true)
-            .put("confirmed", false)
-            .put("action", "text")
-            .put("source", tree.optString("source").ifBlank { AgentModeSourceOcr })
-            .put("reason", AgentModeReasonInjectedUnconfirmed)
-            .put("text_input_method", method.orEmpty())
-            .put("confirmation", "无法确认")
-            .put("nodes", tree.opt("nodes") ?: JSONArray())
-            .put("stdout", "Text was sent without a confirmed editable control.")
     }
 
     private suspend fun gestureScreenshot(
@@ -906,9 +883,10 @@ class AgentModeController(
                 .put("ok", true)
                 .put("action", "screenshot")
                 .put("source", AgentModeSourceOcr)
-                .put("reason", AgentModeReasonNoTree)
+                .put("reason", tree.optString("reason").ifBlank { AgentModeReasonNoTree })
                 .put("confirmation", "无法确认")
-                .put("stdout", "No control tree. The screenshot includes OCR lines only."),
+                .put("stdout", "No control tree. The screenshot includes OCR lines only.")
+                .also { copyTreeDiagnosis(tree, it) },
             includeElements = true,
             attachScreenshot = true,
         )
@@ -988,38 +966,22 @@ class AgentModeController(
                 .put("query", query),
         )
         val attach = agentModeAttachesScreenshot("find_and_input", agentModeWantsScreenshot(arguments))
-        val body = if (!tree.optBoolean("available")) {
-            if (validPoint == null) {
-                failureGuard.record(success = false, query = guardQuery)
-                JSONObject()
-                    .put("ok", false)
-                    .put("confirmed", false)
-                    .put("action", "find_and_input")
-                    .put("source", AgentModeSourceOcr)
-                    .put("reason", AgentModeReasonNoTree)
-                    .put("confirmation", "无法确认")
-                    .put("errmsg", "No control tree and no coordinates, so nothing was tapped or typed.")
-            } else {
-                requireAgentModeService(settings).tap(displayId, validPoint.x, validPoint.y)
-                updateCursorPosition(validPoint.x, validPoint.y, animationDurationMillis = 180)
-                delay(200)
-                val method = requireAgentModeService(settings).text(displayId, text)
-                failureGuard.record(
-                    success = false,
-                    query = guardQuery,
-                    normalizedX = normX,
-                    normalizedY = normY,
-                )
-                JSONObject()
-                    .put("ok", false)
-                    .put("confirmed", false)
-                    .put("action", "find_and_input")
-                    .put("source", AgentModeSourceOcr)
-                    .put("reason", AgentModeReasonOcrUnconfirmed)
-                    .put("text_input_method", method)
-                    .put("confirmation", "无法确认")
-                    .put("errmsg", "No control tree. Tapped the given point and pasted, but the result cannot be confirmed.")
-            }
+        val body = if (!tree.optBoolean("available") || tree.optBoolean("needs_legacy_text")) {
+            val pasted = pasteOnDisplay(settings, displayId, text) {
+                if (validPoint != null) {
+                    requireAgentModeService(settings).tap(displayId, validPoint.x, validPoint.y)
+                    updateCursorPosition(validPoint.x, validPoint.y, animationDurationMillis = 180)
+                    delay(200)
+                }
+            }.put("action", "find_and_input")
+            copyTreeDiagnosis(tree, pasted)
+            failureGuard.record(
+                success = pasted.optBoolean("confirmed"),
+                query = guardQuery,
+                normalizedX = normX,
+                normalizedY = normY,
+            )
+            pasted
         } else {
             tree.put("action", "find_and_input")
             rememberCursor(tree, fallbackX = validPoint?.x, fallbackY = validPoint?.y)
@@ -1040,7 +1002,7 @@ class AgentModeController(
             termuxWorkspaceDirectory,
             body,
             attachScreenshot = attach,
-            includeOcr = body.optString("source") == AgentModeSourceOcr,
+            includeOcr = body.optString("source") == AgentModeSourceOcr && !body.has("elements"),
         )
     }
 
@@ -1065,21 +1027,23 @@ class AgentModeController(
         val attach = agentModeAttachesScreenshot("tap_node", agentModeWantsScreenshot(arguments))
         if (!tree.optBoolean("available")) {
             failureGuard.record(success = false, nodeId = nodeId)
+            val body = JSONObject()
+                .put("ok", false)
+                .put("confirmed", false)
+                .put("action", "tap_node")
+                .put("source", AgentModeSourceOcr)
+                .put("reason", tree.optString("reason").ifBlank { AgentModeReasonNoTree })
+                .put("node_id", nodeId)
+                .put("confirmation", "无法确认")
+                .put("errmsg", "No control tree, so node '$nodeId' was not tapped.")
+            copyTreeDiagnosis(tree, body)
             return deliver(
                 settings,
                 workspaceDirectory,
                 termuxWorkspaceDirectory,
-                JSONObject()
-                    .put("ok", false)
-                    .put("confirmed", false)
-                    .put("action", "tap_node")
-                    .put("source", AgentModeSourceOcr)
-                    .put("reason", AgentModeReasonNoTree)
-                    .put("node_id", nodeId)
-                    .put("confirmation", "无法确认")
-                    .put("errmsg", "No control tree, so node '$nodeId' was not tapped."),
+                body,
                 attachScreenshot = attach,
-                includeOcr = true,
+                includeOcr = !body.has("elements"),
             )
         }
         tree.put("action", "tap_node")
@@ -1139,10 +1103,34 @@ class AgentModeController(
         if (
             fallback != null &&
             fallback.optBoolean("available") &&
-            fallback.optString("reason") != AgentModeReasonDisplayNotInTree
+            fallback.optString("reason") != AgentModeReasonDisplayNotInTree &&
+            fallback.optString("reason") != AgentModeReasonOtherDisplay
         ) {
             finishPending(settings, displayId, fallback)
             return fallback
+        }
+        return unavailableTree(privileged, fallback)
+    }
+
+    private fun unavailableTree(privileged: JSONObject?, fallback: JSONObject?): JSONObject {
+        lastModelNodes = emptyList()
+        lastSnapshotId = ""
+        val foreign = fallback?.optJSONArray("foreign_display_ids")
+            ?: privileged?.optJSONArray("foreign_display_ids")
+        val serviceEnabled = AetherAgentModeAccessibilityService.isEnabled(context)
+        val sawOtherDisplay = foreign != null && foreign.length() > 0
+        val reason = when {
+            !serviceEnabled -> AgentModeReasonAccessibilityDisabled
+            sawOtherDisplay -> AgentModeReasonOtherDisplay
+            else -> AgentModeReasonNoTree
+        }
+        val message = when (reason) {
+            AgentModeReasonAccessibilityDisabled -> AgentModeAccessibilityHint
+            AgentModeReasonOtherDisplay ->
+                "Only other displays had windows. They were ignored, so this virtual display has no control tree."
+            else -> privileged?.optString("errmsg").orEmpty().ifBlank {
+                fallback?.optString("errmsg").orEmpty()
+            }.ifBlank { "No control tree is available for this display." }
         }
         return JSONObject()
             .put("available", false)
@@ -1150,13 +1138,24 @@ class AgentModeController(
             .put("ok", false)
             .put("confirmed", false)
             .put("source", AgentModeSourceOcr)
-            .put("reason", AgentModeReasonNoTree)
-            .put(
-                "errmsg",
-                privileged?.optString("errmsg").orEmpty().ifBlank {
-                    fallback?.optString("errmsg").orEmpty()
-                }.ifBlank { "No control tree is available for this display." },
-            )
+            .put("reason", reason)
+            .put("nodes", JSONArray())
+            .put("errmsg", message)
+            .apply {
+                remove("nearby")
+                if (!serviceEnabled) put("accessibility_hint", AgentModeAccessibilityHint)
+                if (foreign != null) put("foreign_display_ids", foreign)
+            }
+    }
+
+    private fun copyTreeDiagnosis(tree: JSONObject, target: JSONObject) {
+        if (tree.has("accessibility_hint")) target.put("accessibility_hint", tree.optString("accessibility_hint"))
+        if (tree.has("foreign_display_ids")) target.put("foreign_display_ids", tree.opt("foreign_display_ids"))
+        if (tree.optString("reason") == AgentModeReasonAccessibilityDisabled ||
+            tree.optString("reason") == AgentModeReasonOtherDisplay
+        ) {
+            target.put("tree_reason", tree.optString("reason"))
+        }
     }
 
     private suspend fun finishPending(
@@ -1234,12 +1233,12 @@ class AgentModeController(
     }
 
     private fun attachNearby(body: JSONObject, normalizedX: Int?, normalizedY: Int?) {
-        if (body.has("nearby")) return
-        val nodes = parseAgentModeNodes(body.optJSONArray("nodes")).ifEmpty { lastModelNodes }
+        val nodes = parseAgentModeNodes(body.optJSONArray("nodes"))
         if (nodes.isEmpty()) {
-            body.put("confirmation", "无法确认")
+            body.remove("nearby")
             return
         }
+        if (body.has("nearby")) return
         body.put("nearby", agentModeNodesJson(agentModeNearbyNodes(nodes, normalizedX, normalizedY)))
     }
 
@@ -1592,6 +1591,7 @@ class AgentModeController(
                     imageWidth = bitmap.width,
                     imageHeight = bitmap.height,
                     elements = AgentModeTextRecognizer.recognize(bitmap),
+                    fingerprint = downscaleToGrayGrid(bitmap),
                 )
             } finally {
                 bitmap.recycle()
@@ -1645,6 +1645,98 @@ class AgentModeController(
         val imageWidth: Int,
         val imageHeight: Int,
         val elements: List<AgentModeTextElement>,
+        val fingerprint: IntArray?,
+    )
+
+    private suspend fun confirmTapArea(
+        settings: AppSettings,
+        before: DisplayTextCapture?,
+        normalizedX: Int,
+        normalizedY: Int,
+        query: String? = null,
+    ): TapConfirmation {
+        delay(220)
+        val after = captureDisplayText(settings)
+        val cells = agentModeRegionCellIndexes(
+            normalizedX,
+            normalizedY,
+            AgentModeUiChangeGridColumns,
+            AgentModeUiChangeGridRows,
+        )
+        val regionChanged = before?.fingerprint != null && after?.fingerprint != null &&
+            agentModeRegionChanged(before.fingerprint, after.fingerprint, cells)
+        val ocrChanged = !query.isNullOrBlank() && before != null && after != null &&
+            agentModeOcrTargetChanged(
+                query,
+                before.elements.map { it.text },
+                after.elements.map { it.text },
+            )
+        return TapConfirmation(
+            confirmed = regionChanged || ocrChanged,
+            reason = when {
+                ocrChanged -> AgentModeReasonOcrChanged
+                regionChanged -> AgentModeReasonRegionChanged
+                else -> AgentModeReasonNotConfirmed
+            },
+            elements = after?.let { elementsJson(it.elements, it.imageWidth, it.imageHeight) },
+        )
+    }
+
+    private suspend fun pasteOnDisplay(
+        settings: AppSettings,
+        displayId: Int,
+        text: String,
+        beforePaste: (suspend () -> Unit)? = null,
+    ): JSONObject {
+        val before = captureDisplayText(settings)
+        beforePaste?.invoke()
+        val method = requireAgentModeService(settings).text(displayId, text)
+        delay(250)
+        val after = captureDisplayText(settings)
+        val textSeen = after != null && agentModeTextVisible(text, after.elements.map { it.text })
+        val regionChanged = before?.fingerprint != null && after?.fingerprint != null &&
+            agentModeRegionChanged(
+                before.fingerprint,
+                after.fingerprint,
+                agentModeRegionCellIndexes(
+                    500,
+                    940,
+                    AgentModeUiChangeGridColumns,
+                    AgentModeUiChangeGridRows,
+                    radius = 140,
+                ),
+            )
+        val confirmed = textSeen || regionChanged
+        return JSONObject()
+            .put("ok", true)
+            .put("confirmed", confirmed)
+            .put("source", AgentModeSourceOcr)
+            .put(
+                "reason",
+                when {
+                    textSeen -> AgentModeReasonOcrChanged
+                    regionChanged -> AgentModeReasonRegionChanged
+                    else -> AgentModeReasonClipboardPaste
+                },
+            )
+            .put("text_input_method", method)
+            .put(
+                "stdout",
+                if (confirmed) {
+                    "Pasted on the Agent Mode display and the composer area changed."
+                } else {
+                    "Pasted on the Agent Mode display. Do not tap the field first and do not send the same text again unless the composer is still empty."
+                },
+            )
+            .apply {
+                if (after != null) put("elements", elementsJson(after.elements, after.imageWidth, after.imageHeight))
+            }
+    }
+
+    private data class TapConfirmation(
+        val confirmed: Boolean,
+        val reason: String,
+        val elements: JSONArray?,
     )
 
     /** `find_text`: locate matching elements without touching the display. */
@@ -1743,39 +1835,58 @@ class AgentModeController(
                 action = "tap_text",
             )
         }
+        val normX = normalizeAgentModePixel(resolvedMatch.boundingBox.centerX(), capture.imageWidth)
+        val normY = normalizeAgentModePixel(resolvedMatch.boundingBox.centerY(), capture.imageHeight)
         requireAgentModeService(settings).tap(displayId, targetX, targetY)
         updateCursorPosition(targetX, targetY, animationDurationMillis = 180)
-        failureGuard.record(success = false, query = query)
+        val confirmation = confirmTapArea(settings, capture, normX, normY, query)
+        failureGuard.record(success = confirmation.confirmed, query = query)
+        val bbox = JSONArray().apply {
+            put(normalizeAgentModePixel(resolvedMatch.boundingBox.left, capture.imageWidth))
+            put(normalizeAgentModePixel(resolvedMatch.boundingBox.top, capture.imageHeight))
+            put(normalizeAgentModePixel(resolvedMatch.boundingBox.right, capture.imageWidth))
+            put(normalizeAgentModePixel(resolvedMatch.boundingBox.bottom, capture.imageHeight))
+        }
+        val extras = JSONObject()
+            .put("ok", confirmation.confirmed)
+            .put("confirmed", confirmation.confirmed)
+            .put("action", "tap_text")
+            .put("query", query)
+            .put("source", AgentModeSourceOcr)
+            .put("reason", confirmation.reason)
+            .put("matched_text", resolvedMatch.text)
+            .put("scroll_attempts", scrollAttempts)
+            .put("matched_bbox_norm", bbox)
+            .put("tap_norm", JSONArray().put(normX).put(normY))
+            .put(
+                "stdout",
+                if (confirmation.confirmed) {
+                    "Tapped the OCR box center of '${resolvedMatch.text}' at normalized [$normX, $normY]. The target area changed."
+                } else {
+                    "Tapped the OCR box center of '${resolvedMatch.text}' at normalized [$normX, $normY], but that area did not change. Do not convert screenshot pixels."
+                },
+            )
+            .apply {
+                confirmation.elements?.let { put("elements", it) }
+            }
+        if (!attachScreenshot) {
+            return deliver(
+                settings,
+                workspaceDirectory,
+                termuxWorkspaceDirectory,
+                extras,
+                attachScreenshot = false,
+                includeOcr = !extras.has("elements"),
+            )
+        }
         return captureAfterDelay(
             settings,
             workspaceDirectory,
             termuxWorkspaceDirectory,
-            delayMillis = if (attachScreenshot) 350 else 0,
-            extras = focusExtras(settings, displayId)
-                .put("ok", true)
-                .put("confirmed", false)
-                .put("action", "tap_text")
-                .put("query", query)
-                .put("source", AgentModeSourceOcr)
-                .put("reason", AgentModeReasonOcrUnconfirmed)
-                .put("confirmation", "无法确认")
-                .put("matched_text", resolvedMatch.text)
-                .put("scroll_attempts", scrollAttempts)
-                .put(
-                    "stdout",
-                    "Tapped OCR text '${resolvedMatch.text}'. No control tree, so the tap is not confirmed.",
-                )
-                .put(
-                    "matched_bbox_norm",
-                    JSONArray().apply {
-                        put(normalizeAgentModePixel(resolvedMatch.boundingBox.left, capture.imageWidth))
-                        put(normalizeAgentModePixel(resolvedMatch.boundingBox.top, capture.imageHeight))
-                        put(normalizeAgentModePixel(resolvedMatch.boundingBox.right, capture.imageWidth))
-                        put(normalizeAgentModePixel(resolvedMatch.boundingBox.bottom, capture.imageHeight))
-                    },
-                ),
-            includeElements = true,
-            attachScreenshot = attachScreenshot,
+            delayMillis = 200,
+            extras = extras,
+            includeElements = !extras.has("elements"),
+            attachScreenshot = true,
         )
     }
 

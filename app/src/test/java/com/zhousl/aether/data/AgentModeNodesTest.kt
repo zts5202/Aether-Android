@@ -134,6 +134,27 @@ class AgentModeNodesTest {
         assertEquals(listOf("n2", "n3"), nearby.map { it.id })
     }
 
+    @Test
+    fun windowFilterKeepsOnlyTheRequestedDisplay() {
+        val requested = 5
+        val mixed = listOf(
+            AgentModeWindowCandidate(mapKey = 5, displayId = 0),
+            AgentModeWindowCandidate(mapKey = 0, displayId = 5),
+            AgentModeWindowCandidate(mapKey = 0, displayId = 0),
+        )
+        val selection = selectAgentModeWindowIndexes(requested, mixed)
+        assertEquals(listOf(1), selection.acceptedIndexes)
+        assertEquals(listOf(0), selection.foreignDisplayIds)
+
+        val mainOnly = listOf(AgentModeWindowCandidate(mapKey = 0, displayId = 0))
+        val rejected = selectAgentModeWindowIndexes(requested, mainOnly)
+        assertTrue(rejected.acceptedIndexes.isEmpty())
+        assertEquals(listOf(0), rejected.foreignDisplayIds)
+
+        val unknownId = listOf(AgentModeWindowCandidate(mapKey = requested, displayId = AgentModeInvalidDisplayId))
+        assertEquals(listOf(0), selectAgentModeWindowIndexes(requested, unknownId).acceptedIndexes)
+    }
+
     private fun node(id: String, centerY: Int) = AgentModeNode(
         id = id,
         type = "Button",

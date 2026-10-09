@@ -66,5 +66,7 @@ class PiAgentPromptTest {
         assertTrue(enabled.contains("tap_node"))
         assertTrue(enabled.contains("include_screenshot"))
         assertTrue(enabled.contains("same area"))
+        assertFalse(enabled.contains("pixel_x / image_width"))
+        assertTrue(enabled.contains("accessibility_hint"))
     }
 }

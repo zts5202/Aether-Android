@@ -42,6 +42,23 @@ class AgentModeCoordinatesTest {
     }
 
     @Test
+    fun ocrBoxCenterRoundTripsOntoTheDisplay() {
+        val imageWidth = 588
+        val imageHeight = 1280
+        val centerX = 420
+        val centerY = 1240
+        val normX = normalizeAgentModePixel(centerX, imageWidth)
+        val normY = normalizeAgentModePixel(centerY, imageHeight)
+        assertEquals(969, normY)
+        val displayWidth = 1200
+        val displayHeight = 2608
+        val pixelX = (resolveAgentModeCoordinate("x", normX.toDouble(), displayWidth) as AgentModeCoordinateResult.Valid).pixel
+        val pixelY = (resolveAgentModeCoordinate("y", normY.toDouble(), displayHeight) as AgentModeCoordinateResult.Valid).pixel
+        assertTrue(kotlin.math.abs(normalizeAgentModePixel(pixelX, displayWidth) - normX) <= 1)
+        assertTrue(kotlin.math.abs(normalizeAgentModePixel(pixelY, displayHeight) - normY) <= 1)
+    }
+
+    @Test
     fun screenshotSizeMatchesCaptureScaling() {
         assertEquals(576 to 1280, agentModeScreenshotSize(1080, 2400, 1280))
         assertEquals(800 to 600, agentModeScreenshotSize(800, 600, 1280))

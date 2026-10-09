@@ -607,11 +607,11 @@ class AetherAgentModeShizukuService @Keep constructor(
      * Shell UiAutomation is constructed against the default display, but [UiAutomation.getWindowsOnAllDisplays]
      * is not filtered by that display. Null means the connection itself failed.
      */
-    private fun automationWindows(displayId: Int): List<AccessibilityWindowInfo>? {
+    private fun automationWindows(displayId: Int): AgentModeWindowBatch? {
         val automation = uiAutomationOrNull() ?: return null
         return runCatching {
             automation.clearCache()
-            automation.windowsOnAllDisplays.get(displayId)?.toList().orEmpty()
+            windowsForRequestedDisplay(displayId, automation.windowsOnAllDisplays)
         }.getOrElse {
             disconnectUiAutomation()
             null

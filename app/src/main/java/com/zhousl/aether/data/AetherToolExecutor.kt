@@ -248,15 +248,17 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
     put(
         "description",
         "Operate Aether Agent Mode on an isolated Android virtual display. Use this only when Agent Mode is selected in the chat composer. " +
-            "Prefer find_and_tap, find_and_input, and tap_node. They use the real controls on this display. " +
+            "Sending a chat message is launch, then find_and_input, then find_and_tap on the send label. Do not take a screenshot for those steps. " +
+            "Prefer find_and_tap, find_and_input, and tap_node. They use controls on this virtual display only. " +
             "Do not guess coordinates in the same area again after a miss: two failures on the same query, node id, or nearby point stop the third attempt and nothing is injected. " +
             "tap/swipe coordinates are normalized 0..1000 on each axis, independent of resolution; values above 1000 are rejected. " +
             "A successful tree read returns nodes (at most 20, serialized to at most 1500 characters). Each node has id, type, text, editable, and center [x, y] in 0..1000. " +
-            "source is ui_automation, accessibility_service, or ocr. ocr means the control tree was unavailable and the lines cannot confirm the action. " +
-            "find_and_input types with the control's set-text action, then clipboard paste. Do not use shell input text. " +
+            "source is ui_automation, accessibility_service, or ocr. Nodes, nearby nodes, and focus come only from the Agent Mode display. " +
+            "accessibility_hint means the accessibility service is off or restricted. Do not guess coordinates. " +
+            "find_and_input uses the control's set-text action when an editable node exists, otherwise clipboard paste on this display. Do not use shell input text. clipboard_paste means the text was already sent. " +
             "screenshot always attaches an image. tap, swipe, key, text, tap_text, find_and_tap, find_and_input, and tap_node omit the image unless include_screenshot is true; the result then has screenshot_omitted=\"not_requested\". " +
-            "OCR fallback lines use text and bbox_norm = [left, top, right, bottom] in 0..1000. find_text and tap_text remain available. " +
-            "Success is the control action result or a focus/text change. A screenshot difference is not confirmation.",
+            "OCR lines use text and bbox_norm = [left, top, right, bottom] in 0..1000. find_and_tap and tap_text tap that box center in the app. Do not convert screenshot pixels. " +
+            "Success is the control action, a focus or text change, region_changed, or ocr_text_changed.",
     )
     put(
         "parameters",
@@ -278,8 +280,8 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
                             key,
                             integerProperty(
                                 "For ${if (key.length == 1) "tap" else "swipe"}: normalized $axis coordinate in 0..1000 " +
-                                    "(0 = left/top edge, 1000 = right/bottom edge), NOT screenshot or display pixels. " +
-                                    "Convert a screenshot pixel with pixel / image_$axis * 1000.",
+                                    "(0 = left/top edge, 1000 = right/bottom edge). " +
+                                    "Prefer a node center or the tap_norm from an OCR result. Do not convert screenshot pixels.",
                             ),
                         )
                     }
@@ -289,7 +291,7 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
                         "text",
                         stringProperty(
                             "For text and find_and_input: text to insert, including Chinese. " +
-                                "Prefer find_and_input, which uses the control's set-text action and falls back to clipboard paste.",
+                                "find_and_input uses set-text when an editable node exists, otherwise clipboard paste. Do not tap the field first.",
                         ),
                     )
                 },
