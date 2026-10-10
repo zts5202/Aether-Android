@@ -395,4 +395,57 @@ class ConversationUiTest {
             },
         )
     }
+
+    @Test
+    fun agentModeProcessLogKeepsTheLatestReplyOutsideTheCollapsedSteps() {
+        val swipe = ChatToolInvocation(
+            id = "swipe",
+            toolName = "agent_display",
+            argumentsJson = """{"action":"swipe","x1":"500","y1":"900","x2":"500","y2":"400"}""",
+            isRunning = true,
+        )
+        val blocks = listOf(
+            AssistantResponseBlock.Text(id = "note-1", text = "I'll help you open Settings."),
+            AssistantResponseBlock.Reasoning(
+                id = "thought-1",
+                trace = ReasoningTrace(
+                    id = "thought-1",
+                    latestStatusText = "Using agent_display",
+                    completedAtMillis = 2_000L,
+                    toolInvocations = listOf(swipe.copy(isRunning = false)),
+                ),
+            ),
+            AssistantResponseBlock.Text(id = "note-2", text = "The scroll didn't happen."),
+            AssistantResponseBlock.Status(id = "status-1", text = "Reconnecting...", detail = ""),
+        )
+
+        val log = splitAgentModePendingLog(blocks)
+
+        assertEquals(listOf("note-1", "thought-1"), log.processBlocks.map { it.id })
+        assertEquals("The scroll didn't happen.", log.answerText)
+        assertEquals(listOf("status-1"), log.statusBlocks.map { it.id })
+        assertEquals(
+            "agent_display swipe 500,900 -> 500,400 ms · 工作了 7s",
+            agentModeProcessSummaryLine(
+                actionLabel = currentRunningToolLabel(
+                    agentModeProcessToolInvocations(
+                        blocks = log.processBlocks,
+                        pendingToolInvocations = listOf(swipe),
+                    ),
+                ),
+                elapsedLabel = "工作了 7s",
+            ),
+        )
+    }
+
+    @Test
+    fun agentModeProcessLogDoesNotCollapseALoneAnswer() {
+        val log = splitAgentModePendingLog(
+            listOf(AssistantResponseBlock.Text(id = "answer", text = "Done.")),
+        )
+
+        assertTrue(log.processBlocks.isEmpty())
+        assertEquals("Done.", log.answerText)
+        assertEquals("工作了 7s", agentModeProcessSummaryLine("", "工作了 7s"))
+    }
 }

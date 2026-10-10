@@ -262,6 +262,60 @@ internal fun shouldRenderPendingAssistantText(
     agentPreviewVisible: Boolean,
 ): Boolean = text.isNotBlank()
 
+/**
+ * Agent Mode process rows (earlier notes, thought lines, tool steps) collapse behind one summary.
+ * The latest assistant text stays outside so the answer is not buried in that log.
+ */
+internal data class AgentModePendingLog(
+    val processBlocks: List<AssistantResponseBlock>,
+    val answerText: String?,
+    val statusBlocks: List<AssistantResponseBlock.Status>,
+)
+
+internal fun splitAgentModePendingLog(
+    blocks: List<AssistantResponseBlock>,
+): AgentModePendingLog {
+    val lastAnswerIndex = blocks.indexOfLast { block ->
+        block is AssistantResponseBlock.Text && block.text.isNotBlank()
+    }
+    val processBlocks = mutableListOf<AssistantResponseBlock>()
+    val statusBlocks = mutableListOf<AssistantResponseBlock.Status>()
+    blocks.forEachIndexed { index, block ->
+        if (index == lastAnswerIndex) return@forEachIndexed
+        when (block) {
+            is AssistantResponseBlock.Text -> if (block.text.isNotBlank()) processBlocks += block
+            is AssistantResponseBlock.ToolGroup -> if (block.toolInvocations.isNotEmpty()) processBlocks += block
+            is AssistantResponseBlock.Reasoning -> if (
+                hasVisibleReasoningStatus(block.trace) || block.trace.toolInvocations.isNotEmpty()
+            ) {
+                processBlocks += block
+            }
+            is AssistantResponseBlock.Status -> if (block.text.isNotBlank()) statusBlocks += block
+        }
+    }
+    val answerText = (blocks.getOrNull(lastAnswerIndex) as? AssistantResponseBlock.Text)
+        ?.text
+        ?.takeIf { it.isNotBlank() }
+    return AgentModePendingLog(
+        processBlocks = processBlocks,
+        answerText = answerText,
+        statusBlocks = statusBlocks,
+    )
+}
+
+internal fun agentModeProcessSummaryLine(
+    actionLabel: String,
+    elapsedLabel: String,
+): String {
+    val action = actionLabel.trim()
+    val elapsed = elapsedLabel.trim()
+    return when {
+        action.isNotBlank() && elapsed.isNotBlank() && action != elapsed -> "$action · $elapsed"
+        action.isNotBlank() -> action
+        else -> elapsed
+    }
+}
+
 internal fun shouldRenderPendingGenerationBlock(
     isSending: Boolean,
     pendingResponseBlocks: List<AssistantResponseBlock>,
@@ -1576,6 +1630,8 @@ private fun PendingAssistantTimeline(
     } else {
         ""
     }
+    val agentModePendingLog = if (agentModeSelected) splitAgentModePendingLog(blocks) else null
+    val collapseAgentModeProcessLog = agentModePendingLog?.processBlocks?.isNotEmpty() == true
     if (blocks.isEmpty()) {
         if (chromePreviewVisible) {
             AgentModePreviewPanel(
@@ -1601,7 +1657,9 @@ private fun PendingAssistantTimeline(
                 onAttachSurface = onAttachAgentModePreviewSurface,
                 onDetachSurface = onDetachAgentModePreviewSurface,
             )
-            RunningToolActionLine(blockAgentModeInvocations + pendingAgentModeInvocations)
+            if (!collapseAgentModeProcessLog) {
+                RunningToolActionLine(blockAgentModeInvocations + pendingAgentModeInvocations)
+            }
         } else if (!chromePreviewVisible && visiblePendingInvocations.isNotEmpty()) {
             val pendingToolsStartedAtMillis = visiblePendingInvocations
                 .mapNotNull { it.startedAtMillis.takeIf { timestamp -> timestamp > 0L } }
@@ -1663,7 +1721,9 @@ private fun PendingAssistantTimeline(
             onAttachSurface = onAttachAgentModePreviewSurface,
             onDetachSurface = onDetachAgentModePreviewSurface,
         )
-        RunningToolActionLine(blockAgentModeInvocations + pendingAgentModeInvocations)
+        if (!collapseAgentModeProcessLog) {
+            RunningToolActionLine(blockAgentModeInvocations + pendingAgentModeInvocations)
+        }
     }
 
     val workStartedAtMillis = listOfNotNull(
@@ -1698,7 +1758,63 @@ private fun PendingAssistantTimeline(
         }
     }
 
-    if (shouldShowWorkingDisclosure) {
+    val pendingLog = agentModePendingLog
+    if (collapseAgentModeProcessLog && pendingLog != null) {
+        val elapsedLabel = formatWorkedSummaryTitle(workingDurationMillis)
+        val summaryInvocations = agentModeProcessToolInvocations(
+            blocks = pendingLog.processBlocks,
+            pendingToolInvocations = pendingToolInvocations,
+        )
+        val runningLabel = currentRunningToolLabel(summaryInvocations)
+        val actionLabel = when {
+            runningLabel.isBlank() && summaryInvocations.size > 1 ->
+                stringResource(R.string.tool_invocation_group_executing, summaryInvocations.size)
+            runningLabel.isNotBlank() && summaryInvocations.size > 1 ->
+                stringResource(
+                    R.string.tool_invocation_group_executing_action,
+                    runningLabel,
+                    summaryInvocations.size,
+                )
+            else -> runningLabel
+        }
+        AgentWorkSummaryDisclosure(
+            title = agentModeProcessSummaryLine(actionLabel, elapsedLabel),
+            stateKey = "agent-mode-process-$pendingToolInvocationStateKey",
+            initiallyExpanded = false,
+        ) {
+            AgentWorkingStatusHeader(title = elapsedLabel)
+            pendingLog.processBlocks.forEachIndexed { index, block ->
+                PendingAssistantTimelineBlock(
+                    block = block,
+                    index = index,
+                    isLastBlock = index == pendingLog.processBlocks.lastIndex,
+                    agentModePreviewVisible = true,
+                    workspaceDirectory = workspaceDirectory,
+                    allowRootImageRead = allowRootImageRead,
+                    onOpenLink = onOpenLink,
+                    pendingToolInvocationStateKey = pendingToolInvocationStateKey,
+                    agentModeSelected = agentModeSelected,
+                    agentModeDisplayState = agentModeDisplayState,
+                    onAttachAgentModePreviewSurface = onAttachAgentModePreviewSurface,
+                    onDetachAgentModePreviewSurface = onDetachAgentModePreviewSurface,
+                )
+            }
+        }
+        pendingLog.answerText?.let { answer ->
+            PendingAssistantResponseBlock(
+                text = answer,
+                workspaceDirectory = workspaceDirectory,
+                allowRootImageRead = allowRootImageRead,
+                onOpenLink = onOpenLink,
+            )
+        }
+        pendingLog.statusBlocks.forEach { status ->
+            ReconnectingStatusCard(
+                text = status.text,
+                detail = status.detail,
+            )
+        }
+    } else if (shouldShowWorkingDisclosure) {
         AgentWorkingStatusHeader(
             title = formatWorkedSummaryTitle(workingDurationMillis),
         )
@@ -1719,6 +1835,24 @@ private fun PendingAssistantTimeline(
             )
         }
     }
+}
+
+internal fun agentModeProcessToolInvocations(
+    blocks: List<AssistantResponseBlock>,
+    pendingToolInvocations: List<ChatToolInvocation>,
+): List<ChatToolInvocation> {
+    val byId = linkedMapOf<String, ChatToolInvocation>()
+    blocks.forEach { block ->
+        val invocations = when (block) {
+            is AssistantResponseBlock.ToolGroup -> block.toolInvocations
+            is AssistantResponseBlock.Reasoning -> block.trace.toolInvocations
+            is AssistantResponseBlock.Text -> emptyList()
+            is AssistantResponseBlock.Status -> emptyList()
+        }
+        invocations.forEach { invocation -> byId[invocation.id] = invocation }
+    }
+    pendingToolInvocations.forEach { invocation -> byId[invocation.id] = invocation }
+    return byId.values.toList()
 }
 
 @Composable
