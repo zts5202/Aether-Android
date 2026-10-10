@@ -8,6 +8,8 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.zhousl.aether.data.AgentModeMaxNodeChars
 import com.zhousl.aether.data.AgentModeNodeDraft
 import com.zhousl.aether.data.AgentModeNodeSelection
+import com.zhousl.aether.data.AgentModeClickPathActionClick
+import com.zhousl.aether.data.AgentModeClickPathTouch
 import com.zhousl.aether.data.AgentModeReasonActionClick
 import com.zhousl.aether.data.AgentModeReasonActionSetText
 import com.zhousl.aether.data.AgentModeReasonClipboardPaste
@@ -15,11 +17,12 @@ import com.zhousl.aether.data.AgentModeReasonDisplayNotInTree
 import com.zhousl.aether.data.AgentModeReasonEmptyTree
 import com.zhousl.aether.data.AgentModeReasonOtherDisplay
 import com.zhousl.aether.data.agentModeTreeHasControls
-import com.zhousl.aether.data.AgentModeReasonFocusChanged
 import com.zhousl.aether.data.AgentModeReasonNodeNotFound
 import com.zhousl.aether.data.AgentModeReasonNotConfirmed
 import com.zhousl.aether.data.AgentModeReasonUiAutomationUnavailable
+import com.zhousl.aether.data.agentModeClassLooksLikeWebView
 import com.zhousl.aether.data.agentModeMatchRank
+import com.zhousl.aether.data.agentModePrimaryClickIsTouch
 import com.zhousl.aether.data.agentModeNearbyNodes
 import com.zhousl.aether.data.agentModeNodesJson
 import com.zhousl.aether.data.selectAgentModeNodes
@@ -148,22 +151,17 @@ internal class AgentModeUiTreeSession(
         val index = nodeAt(collected, x, y, width, height)
         val published = publish(collected, query = "", width, height, pin = setOfNotNull(index))
         if (index == null) {
-            tapPixels(displayId, x, y, published)
-            return confirmCoordinate(displayId, collected, published, AgentModeReasonNotConfirmed)
+            return injectTouch(displayId, x, y, published.put("in_webview", false))
         }
-        val before = focusSnap(displayId, collected)
-        val action = performClick(collected, index, width, height)
-        if (action != null) {
-            settle()
-            return published
-                .put("ok", true)
-                .put("confirmed", true)
-                .put("reason", action)
-                .put("node_id", idFor(index))
-        }
-        val draft = collected[index].draft
-        tapPixels(displayId, draft.centerPixelX, draft.centerPixelY, published)
-        return confirmCoordinate(displayId, collected, published, AgentModeReasonNotConfirmed, before)
+        val item = collected[index]
+        return activateNode(
+            displayId = displayId,
+            inWebView = item.inWebView,
+            centerX = item.draft.centerPixelX,
+            centerY = item.draft.centerPixelY,
+            published = published.put("node_id", idFor(index)),
+            tryActionClick = { performClick(collected, index, width, height) != null },
+        )
     }
 
     private fun findAndTap(
@@ -182,22 +180,17 @@ internal class AgentModeUiTreeSession(
         if (index == null) {
             return notFound(published, query, width, height, collected)
         }
-        val before = focusSnap(displayId, collected)
-        val action = performClick(collected, index, width, height)
-        if (action != null) {
-            settle()
-            return published
-                .put("ok", true)
-                .put("confirmed", true)
-                .put("reason", action)
-                .put("node_id", idFor(index))
-                .put("matched_text", collected[index].draft.text.ifBlank { collected[index].draft.description })
-        }
         val draft = collected[index].draft
-        tapPixels(displayId, draft.centerPixelX, draft.centerPixelY, published)
-        return confirmCoordinate(displayId, collected, published, AgentModeReasonNotConfirmed, before)
-            .put("node_id", idFor(index))
-            .put("matched_text", draft.text.ifBlank { draft.description })
+        return activateNode(
+            displayId = displayId,
+            inWebView = collected[index].inWebView,
+            centerX = draft.centerPixelX,
+            centerY = draft.centerPixelY,
+            published = published
+                .put("node_id", idFor(index))
+                .put("matched_text", draft.text.ifBlank { draft.description }),
+            tryActionClick = { performClick(collected, index, width, height) != null },
+        )
     }
 
     private fun findAndInput(
@@ -257,41 +250,19 @@ internal class AgentModeUiTreeSession(
                 message = "Node '$nodeId' is not in the current snapshot. Dump the tree again.",
             ).put("snapshot_id", snapshotId)
         }
-        if (node.info.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            settle()
-            return JSONObject()
-                .put("available", true)
-                .put("ok", true)
-                .put("confirmed", true)
-                .put("reason", AgentModeReasonActionClick)
-                .put("source", source)
-                .put("snapshot_id", node.snapshotId)
-                .put("node_id", node.id)
-        }
-        val beforeWindow = injector?.focusWindow(displayId).orEmpty()
-        val beforeText = node.info.text?.toString().orEmpty()
         val result = JSONObject()
             .put("available", true)
             .put("source", source)
             .put("snapshot_id", node.snapshotId)
             .put("node_id", node.id)
-        tapPixels(displayId, node.bounds.centerX(), node.bounds.centerY(), result)
-        if (injector == null) {
-            return result
-                .put("ok", false)
-                .put("confirmed", false)
-                .put("reason", AgentModeReasonNotConfirmed)
-        }
-        settle()
-        val afterWindow = injector.focusWindow(displayId)
-        node.info.refresh()
-        val afterText = node.info.text?.toString().orEmpty()
-        val changed = (beforeWindow.isNotBlank() && afterWindow.isNotBlank() && beforeWindow != afterWindow) ||
-            beforeText != afterText
-        return result
-            .put("ok", changed)
-            .put("confirmed", changed)
-            .put("reason", if (changed) AgentModeReasonFocusChanged else AgentModeReasonNotConfirmed)
+        return activateNode(
+            displayId = displayId,
+            inWebView = node.inWebView,
+            centerX = node.bounds.centerX(),
+            centerY = node.bounds.centerY(),
+            published = result,
+            tryActionClick = { node.info.performAction(AccessibilityNodeInfo.ACTION_CLICK) },
+        )
     }
 
     private fun writeText(
@@ -331,28 +302,55 @@ internal class AgentModeUiTreeSession(
             .put("text_input_method", pasteMethod)
     }
 
-    private fun confirmCoordinate(
+    /**
+     * WebView nodes get one real touch and no ACTION_CLICK. Native nodes try ACTION_CLICK and
+     * leave a touch for the caller only after a visual no-op. Nothing here is confirmed:
+     * ACTION_CLICK returning true is not a page change.
+     */
+    private fun activateNode(
         displayId: Int,
-        collected: List<Collected>,
+        inWebView: Boolean,
+        centerX: Int,
+        centerY: Int,
         published: JSONObject,
-        fallbackReason: String,
-        before: FocusSnap? = null,
+        tryActionClick: () -> Boolean,
     ): JSONObject {
-        if (published.has("pending_tap_x")) {
-            return published
-                .put("ok", false)
-                .put("confirmed", false)
-                .put("reason", fallbackReason)
+        published.put("in_webview", inWebView)
+        published.put("tap_x", centerX.coerceAtLeast(0))
+        published.put("tap_y", centerY.coerceAtLeast(0))
+        if (agentModePrimaryClickIsTouch(inWebView)) {
+            published.put("action_click_attempted", false)
+            published.put("action_click_returned", false)
+            return injectTouch(displayId, centerX, centerY, published)
         }
-        val start = before ?: focusSnap(displayId, collected)
-        settle()
-        val after = focusSnap(displayId, collected)
-        val changed = start.changedComparedTo(after)
-        return published
-            .put("ok", changed)
-            .put("confirmed", changed)
-            .put("reason", if (changed) AgentModeReasonFocusChanged else fallbackReason)
+        val clicked = tryActionClick()
+        published.put("action_click_attempted", true)
+        published.put("action_click_returned", clicked)
+        if (clicked) {
+            settle()
+            published.put("click_path", AgentModeClickPathActionClick)
+            published.put("touch_injected", false)
+            return markAwaitingVisual(published)
+        }
+        return injectTouch(displayId, centerX, centerY, published)
     }
+
+    private fun injectTouch(displayId: Int, x: Int, y: Int, published: JSONObject): JSONObject {
+        tapPixels(displayId, x, y, published)
+        published.put("click_path", AgentModeClickPathTouch)
+        published.put("touch_injected", injector != null && !published.has("pending_tap_x"))
+        if (!published.has("action_click_attempted")) published.put("action_click_attempted", false)
+        if (!published.has("action_click_returned")) published.put("action_click_returned", false)
+        return markAwaitingVisual(published)
+    }
+
+    private fun markAwaitingVisual(published: JSONObject): JSONObject =
+        published
+            .put("awaiting_visual_confirmation", true)
+            .put("ok", false)
+            .put("confirmed", false)
+            .put("status", "not_confirmed")
+            .put("reason", AgentModeReasonNotConfirmed)
 
     private fun notFound(
         published: JSONObject,
@@ -407,6 +405,7 @@ internal class AgentModeUiTreeSession(
                 info = item.info,
                 bounds = Rect(item.draft.boundsLeft, item.draft.boundsTop, item.draft.boundsRight, item.draft.boundsBottom),
                 sourceIndex = node.sourceIndex,
+                inWebView = item.inWebView,
             )
         }
     }
@@ -536,38 +535,27 @@ internal class AgentModeUiTreeSession(
         return agentModeNodesJson(agentModeNearbyNodes(nodes, normalizedX, normalizedY))
     }
 
-    private fun focusSnap(displayId: Int, collected: List<Collected>): FocusSnap =
-        FocusSnap(
-            window = injector?.focusWindow(displayId).orEmpty(),
-            text = focusedText(collected),
-        )
-
-    private fun focusedText(collected: List<Collected>): String {
-        val roots = collected.filter { it.parentIndex < 0 }.ifEmpty { collected }
-        for (item in roots) {
-            val focused = item.info.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: continue
-            val text = focused.text?.toString().orEmpty()
-            if (focused !== item.info) runCatching { focused.recycle() }
-            return text
-        }
-        return ""
-    }
-
     private fun collect(windows: List<AccessibilityWindowInfo>): List<Collected> {
         val collected = mutableListOf<Collected>()
         for (window in windows) {
             val root = window.agentModeRoot() ?: continue
             root.refresh()
-            walk(root, parentIndex = -1, collected)
+            walk(root, parentIndex = -1, underWebView = false, collected)
         }
         return collected
     }
 
-    private fun walk(node: AccessibilityNodeInfo, parentIndex: Int, collected: MutableList<Collected>) {
+    private fun walk(
+        node: AccessibilityNodeInfo,
+        parentIndex: Int,
+        underWebView: Boolean,
+        collected: MutableList<Collected>,
+    ) {
         if (collected.size >= MaxCollectedNodes) {
             node.recycle()
             return
         }
+        val inWebView = underWebView || agentModeClassLooksLikeWebView(node.className?.toString().orEmpty())
         // isVisibleToUser is often false for every node on a virtual display, which used to
         // drop the whole WeChat tree. Interactive nodes and nodes with text are kept anyway.
         val keep = collected.size < MaxCollectedNodes && (
@@ -576,6 +564,7 @@ internal class AgentModeUiTreeSession(
                 node.isClickable ||
                 node.isFocusable ||
                 node.isScrollable ||
+                inWebView ||
                 !node.text.isNullOrBlank() ||
                 !node.contentDescription.isNullOrBlank()
             )
@@ -585,6 +574,7 @@ internal class AgentModeUiTreeSession(
                     info = node,
                     draft = draftOf(node),
                     parentIndex = parentIndex,
+                    inWebView = inWebView,
                 ),
             )
             collected.lastIndex
@@ -593,7 +583,7 @@ internal class AgentModeUiTreeSession(
         }
         for (childIndex in 0 until node.childCount) {
             val child = node.getChild(childIndex) ?: continue
-            walk(child, if (keep) index else parentIndex, collected)
+            walk(child, if (keep) index else parentIndex, inWebView, collected)
         }
         if (!keep) node.recycle()
     }
@@ -643,6 +633,7 @@ internal class AgentModeUiTreeSession(
         val info: AccessibilityNodeInfo,
         val draft: AgentModeNodeDraft,
         val parentIndex: Int,
+        val inWebView: Boolean,
     )
 
     private data class CachedNode(
@@ -651,15 +642,8 @@ internal class AgentModeUiTreeSession(
         val info: AccessibilityNodeInfo,
         val bounds: Rect,
         val sourceIndex: Int,
+        val inWebView: Boolean,
     )
-
-    private data class FocusSnap(val window: String, val text: String) {
-        fun changedComparedTo(after: FocusSnap): Boolean {
-            val windowChanged = window.isNotBlank() && after.window.isNotBlank() && window != after.window
-            val textChanged = text != after.text
-            return windowChanged || textChanged
-        }
-    }
 
     private companion object {
         const val MaxCollectedNodes = 4000

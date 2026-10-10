@@ -707,13 +707,13 @@ class AgentModeController(
         val normY = normalizeAgentModePixel(point.y, state.height)
         blockedResult("tap", normalizedX = normX, normalizedY = normY)?.let { return it }
         sendRepeatBlock("tap", query = null, normalizedX = normX, normalizedY = normY)?.let { return it }
+        val before = captureDisplayText(settings)
         val tree = invokeTree(
             settings,
             displayId,
             JSONObject().put("op", "click_at").put("x", point.x).put("y", point.y),
         )
         val body = if (!tree.optBoolean("available")) {
-            val before = captureDisplayText(settings)
             requireAgentModeService(settings).tap(displayId, point.x, point.y)
             updateCursorPosition(point.x, point.y, animationDurationMillis = 180)
             val sendLike = agentModeSendLike(query = null, normalizedX = normX, normalizedY = normY)
@@ -740,6 +740,15 @@ class AgentModeController(
         } else {
             tree.put("action", "tap")
             rememberCursor(tree, point.x, point.y)
+            confirmTreeClick(
+                settings,
+                displayId,
+                tree,
+                before,
+                query = null,
+                fallbackNormX = normX,
+                fallbackNormY = normY,
+            )
             applySendPolicy(tree, query = null, normalizedX = normX, normalizedY = normY)
             tree
         }
@@ -927,6 +936,7 @@ class AgentModeController(
         if (query.isBlank()) return invalidArguments("Missing required 'query' argument for find_and_tap.")
         blockedResult("find_and_tap", query = query)?.let { return it }
         sendRepeatBlock("find_and_tap", query = query, normalizedX = null, normalizedY = null)?.let { return it }
+        val before = captureDisplayText(settings)
         val tree = invokeTree(
             settings,
             displayId,
@@ -947,9 +957,18 @@ class AgentModeController(
             )
         }
         tree.put("action", "find_and_tap")
+        rememberCursor(tree, fallbackX = null, fallbackY = null)
+        confirmTreeClick(
+            settings,
+            displayId,
+            tree,
+            before,
+            query = query,
+            fallbackNormX = null,
+            fallbackNormY = null,
+        )
         applySendPolicy(tree, query = query, normalizedX = null, normalizedY = null)
         rememberNodes(tree)
-        rememberCursor(tree, fallbackX = null, fallbackY = null)
         val confirmed = tree.optBoolean("confirmed")
         failureGuard.record(success = confirmed, query = query)
         if (!confirmed) attachNearby(tree, null, null)
@@ -1041,6 +1060,7 @@ class AgentModeController(
         val nodeId = arguments.optString("node_id").ifBlank { arguments.optString("nodeId") }.trim()
         if (nodeId.isBlank()) return invalidArguments("Missing required 'node_id' argument for tap_node.")
         blockedResult("tap_node", nodeId = nodeId)?.let { return it }
+        val before = captureDisplayText(settings)
         val tree = invokeTree(
             settings,
             displayId,
@@ -1072,8 +1092,17 @@ class AgentModeController(
             )
         }
         tree.put("action", "tap_node")
-        rememberNodes(tree)
         rememberCursor(tree, fallbackX = null, fallbackY = null)
+        confirmTreeClick(
+            settings,
+            displayId,
+            tree,
+            before,
+            query = null,
+            fallbackNormX = null,
+            fallbackNormY = null,
+        )
+        rememberNodes(tree)
         failureGuard.record(success = tree.optBoolean("confirmed"), nodeId = nodeId)
         if (!tree.optBoolean("confirmed")) attachNearby(tree, null, null)
         return deliver(
@@ -1135,6 +1164,11 @@ class AgentModeController(
         when (agentModeChosenTreeSource(privileged, fallback)) {
             AgentModeSourceUiAutomation -> {
                 finishPending(settings, displayId, privileged!!)
+                tried.put(
+                    agentModeAccessibilitySkipNote(
+                        AetherAgentModeAccessibilityService.isEnabled(context),
+                    ),
+                )
                 privileged.put("sources_tried", tried)
                 return privileged
             }
@@ -1182,6 +1216,7 @@ class AgentModeController(
             return JSONObject()
                 .put("source", source)
                 .put("available", false)
+                .put("tried", true)
                 .put("reason", "not_returned")
                 .put("node_count", 0)
                 .put("candidate_count", 0)
@@ -1192,6 +1227,7 @@ class AgentModeController(
         return JSONObject()
             .put("source", source)
             .put("available", agentModeTreeReadUsable(body))
+            .put("tried", true)
             .put("reason", body.optString("reason"))
             .put("node_count", nodeCount)
             .put(
@@ -1397,17 +1433,21 @@ class AgentModeController(
         if (body.has("pending_tap_x")) {
             val x = body.optInt("pending_tap_x")
             val y = body.optInt("pending_tap_y")
-            val before = focusWindowLabel(settings, displayId)
+            val awaitVisual = body.optBoolean("awaiting_visual_confirmation")
+            val before = if (awaitVisual) "" else focusWindowLabel(settings, displayId)
             service.tap(displayId, x, y)
             updateCursorPosition(x, y, animationDurationMillis = 180)
-            delay(200)
-            val after = focusWindowLabel(settings, displayId)
-            val changed = before.isNotBlank() && after.isNotBlank() && before != after
-            body.put("ok", changed)
-            body.put("confirmed", changed)
-            body.put("reason", if (changed) AgentModeReasonFocusChanged else AgentModeReasonNotConfirmed)
+            body.put("touch_injected", true)
             body.remove("pending_tap_x")
             body.remove("pending_tap_y")
+            if (!awaitVisual) {
+                delay(200)
+                val after = focusWindowLabel(settings, displayId)
+                val changed = before.isNotBlank() && after.isNotBlank() && before != after
+                body.put("ok", changed)
+                body.put("confirmed", changed)
+                body.put("reason", if (changed) AgentModeReasonFocusChanged else AgentModeReasonNotConfirmed)
+            }
         }
         if (body.has("pending_paste")) {
             val text = body.optString("pending_paste")
@@ -1891,6 +1931,20 @@ class AgentModeController(
         delay(220)
         val after = captureDisplayText(settings)
         val elements = after?.let { elementsJson(it.elements, it.imageWidth, it.imageHeight) }
+        val cells = agentModeRegionCellIndexes(
+            normalizedX,
+            normalizedY,
+            AgentModeUiChangeGridColumns,
+            AgentModeUiChangeGridRows,
+        )
+        val beforeGrid = before?.fingerprint
+        val afterGrid = after?.fingerprint
+        val regionComparable = beforeGrid != null && afterGrid != null
+        val regionChanged = if (beforeGrid != null && afterGrid != null) {
+            agentModeRegionChanged(beforeGrid, afterGrid, cells)
+        } else {
+            false
+        }
         if (sendLike) {
             val check = agentModeSendCheck(lastInputText, visibleLines(before), visibleLines(after))
             return TapConfirmation(
@@ -1903,16 +1957,13 @@ class AgentModeController(
                     AgentModeUncertainSendMessage
                 },
                 elements = elements,
+                visualChanged = when {
+                    check.confirmed || regionChanged -> true
+                    regionComparable -> false
+                    else -> null
+                },
             )
         }
-        val cells = agentModeRegionCellIndexes(
-            normalizedX,
-            normalizedY,
-            AgentModeUiChangeGridColumns,
-            AgentModeUiChangeGridRows,
-        )
-        val regionChanged = before?.fingerprint != null && after?.fingerprint != null &&
-            agentModeRegionChanged(before.fingerprint, after.fingerprint, cells)
         val ocrChanged = !query.isNullOrBlank() && before != null && after != null &&
             agentModeOcrTargetChanged(
                 query,
@@ -1930,7 +1981,106 @@ class AgentModeController(
             },
             stdout = "",
             elements = elements,
+            visualChanged = when {
+                confirmed -> true
+                regionComparable -> false
+                else -> null
+            },
         )
+    }
+
+    /**
+     * ACTION_CLICK is not confirmation. Compare the tapped area, and inject one touch only when
+     * that click was compared and did nothing. A WebView touch, or a click that already changed
+     * the screen, is never followed by a second input.
+     */
+    private suspend fun confirmTreeClick(
+        settings: AppSettings,
+        displayId: Int,
+        body: JSONObject,
+        before: DisplayTextCapture?,
+        query: String?,
+        fallbackNormX: Int?,
+        fallbackNormY: Int?,
+    ) {
+        if (!body.optBoolean("available") || !body.optBoolean("awaiting_visual_confirmation")) return
+        val state = _displayState.value
+        val pixelX = if (body.has("tap_x")) body.optInt("tap_x") else null
+        val pixelY = if (body.has("tap_y")) body.optInt("tap_y") else null
+        val normX = pixelX?.let { normalizeAgentModePixel(it, state.width) } ?: fallbackNormX
+        val normY = pixelY?.let { normalizeAgentModePixel(it, state.height) } ?: fallbackNormY
+        if (normX == null || normY == null) {
+            body.put("ok", false)
+            body.put("confirmed", false)
+            body.put("status", "uncertain")
+            body.put("reason", AgentModeReasonUncertain)
+            body.put("stdout", "The click could not be checked visually, so no second input was injected.")
+            return
+        }
+        val sendLike = agentModeSendLike(query, normX, normY)
+        val first = confirmTapArea(settings, before, normX, normY, query, sendLike = sendLike)
+        val fallback = agentModeTouchFallbackCount(
+            actionClickReturnedTrue = body.optBoolean("action_click_returned"),
+            touchAlreadyInjected = body.optBoolean("touch_injected"),
+            visualChanged = first.visualChanged,
+        )
+        val confirmation = if (fallback == 0 || pixelX == null || pixelY == null) {
+            first
+        } else {
+            requireAgentModeService(settings).tap(displayId, pixelX, pixelY)
+            updateCursorPosition(pixelX, pixelY, animationDurationMillis = 180)
+            body.put("touch_injected", true)
+            body.put("action_click_noop", true)
+            body.put("click_path", AgentModeClickPathTouchFallback)
+            confirmTapArea(settings, before, normX, normY, query, sendLike = sendLike)
+        }
+        applyTapConfirmation(body, confirmation)
+    }
+
+    private fun applyTapConfirmation(body: JSONObject, confirmation: TapConfirmation) {
+        val confirmed = confirmation.confirmed || confirmation.visualChanged == true
+        body.put("ok", confirmed)
+        body.put("confirmed", confirmed)
+        body.put(
+            "status",
+            when {
+                confirmed -> "confirmed"
+                confirmation.visualChanged == null -> "uncertain"
+                else -> "not_confirmed"
+            },
+        )
+        body.put(
+            "reason",
+            when {
+                confirmation.confirmed -> confirmation.reason
+                confirmation.visualChanged == true -> AgentModeReasonRegionChanged
+                confirmation.visualChanged == null -> AgentModeReasonUncertain
+                else -> AgentModeReasonNotConfirmed
+            },
+        )
+        confirmation.elements?.let { body.put("elements", it) }
+        if (confirmation.confirmed && confirmation.stdout.isNotBlank()) {
+            body.put("stdout", confirmation.stdout)
+        } else {
+            body.put(
+                "stdout",
+                when {
+                    confirmed && body.optBoolean("action_click_noop") ->
+                        "Accessibility click did not change the control. One touch was injected and the area changed."
+                    confirmed && body.optBoolean("in_webview") ->
+                        "Tapped the WebView control once. The area changed."
+                    confirmed -> "The control changed after one activation."
+                    body.optBoolean("action_click_noop") ->
+                        "Accessibility click did not change the control. One touch was injected, and the area still did not change."
+                    body.optBoolean("in_webview") ->
+                        "Tapped the WebView control once, but the area did not change."
+                    confirmation.visualChanged == null ->
+                        "The click could not be checked visually, so no second input was injected."
+                    confirmation.stdout.isNotBlank() -> confirmation.stdout
+                    else -> "The control did not change."
+                },
+            )
+        }
     }
 
     private fun visibleLines(capture: DisplayTextCapture?): List<AgentModeVisibleLine> {
@@ -1983,6 +2133,8 @@ class AgentModeController(
         val reason: String,
         val stdout: String,
         val elements: JSONArray?,
+        /** True, false after a real comparison, or null when the screen could not be compared. */
+        val visualChanged: Boolean?,
     )
 
     /** `find_text`: locate matching elements without touching the display. */

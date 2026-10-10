@@ -264,7 +264,7 @@ private fun agentModeToolDefinition(): JSONObject = JSONObject().apply {
             "OCR elements use text, granularity, and bbox_norm = [left, top, right, bottom] in 0..1000. find_and_tap and tap_text tap the exact word's box center, not a merged line. Do not convert screenshot pixels. " +
             "A send-like tap is confirmed only when the composer clears or the message appears as a new bubble. Otherwise status is uncertain: take one screenshot and do not tap or type again. " +
             "Do not re-read logs. Repeating the same check with no progress stops the turn. " +
-            "Success is the control action, a focus or text change, region_changed, ocr_text_changed, composer_cleared, or message_bubble.",
+            "confirmed is true only after the tapped area changes (region_changed, ocr_text_changed, composer_cleared, or message_bubble). A WebView control is tapped with one real touch. ACTION_CLICK alone is not confirmation.",
     )
     put(
         "parameters",
