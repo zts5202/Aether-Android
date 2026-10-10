@@ -35,6 +35,10 @@ internal const val AgentModeReasonRegionChanged = "region_changed"
 internal const val AgentModeReasonOcrChanged = "ocr_text_changed"
 internal const val AgentModeReasonEmptyTree = "empty_tree"
 internal const val AgentModeReasonUncertain = "uncertain"
+internal const val AgentModeReasonSkippedUiAutomation = "skipped_ui_automation_returned_nodes"
+internal const val AgentModeClickPathTouch = "touch"
+internal const val AgentModeClickPathActionClick = "action_click"
+internal const val AgentModeClickPathTouchFallback = "touch_after_noop"
 internal const val AgentModeReasonSendNeedsScreenshot = "send_needs_screenshot"
 internal const val AgentModeInvalidDisplayId = -1
 
@@ -492,6 +496,140 @@ internal fun agentModeTreeReadUsable(body: JSONObject): Boolean {
     if (nodes.length() > 0) return true
     val candidates = if (body.has("candidate_count")) body.optInt("candidate_count") else -1
     return candidates != 0
+}
+
+/** WebView and OEM wrappers (class name contains "WebView") do not honor accessibility clicks. */
+internal fun agentModeClassLooksLikeWebView(className: String): Boolean =
+    className.contains("WebView", ignoreCase = true)
+
+/**
+ * True when [index] or a kept ancestor is a WebView. [parentIndexes] uses -1 for a root.
+ * A cycle or a parent outside the list stops the walk.
+ */
+internal fun agentModeNodeInWebView(
+    classNames: List<String>,
+    parentIndexes: List<Int>,
+    index: Int,
+): Boolean {
+    var current = index
+    var hops = 0
+    val seen = HashSet<Int>()
+    while (current in classNames.indices && hops < 64 && seen.add(current)) {
+        if (agentModeClassLooksLikeWebView(classNames[current])) return true
+        val parent = parentIndexes.getOrNull(current) ?: return false
+        if (parent < 0) return false
+        current = parent
+        hops += 1
+    }
+    return false
+}
+
+/** WebView content is activated with one real touch. Native controls still start with ACTION_CLICK. */
+internal fun agentModePrimaryClickIsTouch(inWebView: Boolean): Boolean = inWebView
+
+/**
+ * How many MotionEvent taps to add after the primary input.
+ * A touch is added only when ACTION_CLICK returned and the screen was compared and did not change.
+ * An unknown comparison adds nothing, so a control that already responded is not tapped again.
+ * A second call after the fallback touch returns 0.
+ */
+internal fun agentModeTouchFallbackCount(
+    actionClickReturnedTrue: Boolean,
+    touchAlreadyInjected: Boolean,
+    visualChanged: Boolean?,
+): Int {
+    if (touchAlreadyInjected) return 0
+    if (!actionClickReturnedTrue) return 0
+    if (visualChanged != false) return 0
+    return 1
+}
+
+internal data class AgentModeClickTrace(
+    val actionClicks: Int,
+    val touches: Int,
+    val confirmed: Boolean,
+    val status: String,
+)
+
+/**
+ * One activation of a control. WebView skips ACTION_CLICK. A native click that changes the
+ * screen is the only input. A proven no-op is followed by exactly one touch, and that touch
+ * is the only result that can be confirmed.
+ */
+internal fun agentModeTraceClick(
+    inWebView: Boolean,
+    actionClickReturnsTrue: Boolean,
+    visualAfterActionClick: Boolean?,
+    visualAfterTouch: Boolean?,
+): AgentModeClickTrace {
+    if (agentModePrimaryClickIsTouch(inWebView)) {
+        return clickTrace(actionClicks = 0, touches = 1, visualChanged = visualAfterTouch)
+    }
+    if (!actionClickReturnsTrue) {
+        return clickTrace(actionClicks = 0, touches = 1, visualChanged = visualAfterTouch)
+    }
+    if (visualAfterActionClick == true) {
+        return AgentModeClickTrace(
+            actionClicks = 1,
+            touches = 0,
+            confirmed = true,
+            status = "confirmed",
+        )
+    }
+    val extra = agentModeTouchFallbackCount(
+        actionClickReturnedTrue = true,
+        touchAlreadyInjected = false,
+        visualChanged = visualAfterActionClick,
+    )
+    if (extra == 0) {
+        return AgentModeClickTrace(
+            actionClicks = 1,
+            touches = 0,
+            confirmed = false,
+            status = if (visualAfterActionClick == null) "uncertain" else "not_confirmed",
+        )
+    }
+    return clickTrace(actionClicks = 1, touches = extra, visualChanged = visualAfterTouch)
+}
+
+private fun clickTrace(actionClicks: Int, touches: Int, visualChanged: Boolean?): AgentModeClickTrace =
+    AgentModeClickTrace(
+        actionClicks = actionClicks,
+        touches = touches,
+        confirmed = visualChanged == true,
+        status = when (visualChanged) {
+            true -> "confirmed"
+            false -> "not_confirmed"
+            null -> "uncertain"
+        },
+    )
+
+/**
+ * Row recorded when ui_automation already returned controls, so the accessibility service
+ * is not asked to perform the same action. [serviceEnabled] is availability, not a second read.
+ */
+internal fun agentModeAccessibilitySkipNote(serviceEnabled: Boolean): JSONObject {
+    val reason = if (serviceEnabled) {
+        AgentModeReasonSkippedUiAutomation
+    } else {
+        AgentModeReasonAccessibilityDisabled
+    }
+    val errmsg = if (serviceEnabled) {
+        "Accessibility service is enabled. It was not queried because ui_automation already returned controls."
+    } else {
+        "Accessibility service is off or not connected. Skipped because ui_automation already returned controls. " +
+            "WebView taps do not require enabling it."
+    }
+    return JSONObject()
+        .put("source", AgentModeSourceAccessibility)
+        .put("available", false)
+        .put("service_enabled", serviceEnabled)
+        .put("tried", false)
+        .put("skipped", true)
+        .put("reason", reason)
+        .put("node_count", 0)
+        .put("candidate_count", 0)
+        .put("errmsg", errmsg)
 }
 
 internal fun agentModeTargetKey(
